@@ -1,0 +1,11 @@
+.git
+.gitignore
+*.md
+!README.md
+!docs/
+!docs/*.md
+web/node_modules
+web/dist
+*.exe
+.env
+.env.*

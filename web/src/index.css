@@ -1,0 +1,464 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #0f1419;
+  color: #e6edf3;
+  min-height: 100vh;
+}
+#root {
+  min-height: 100vh;
+}
+
+:root {
+  --bg: #0f1419;
+  --panel: #161b22;
+  --border: #30363d;
+  --accent: #58a6ff;
+  --success: #3fb950;
+  --danger: #f85149;
+  --muted: #8b949e;
+}
+
+button {
+  cursor: pointer;
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--e6edf3, #e6edf3);
+}
+button:hover {
+  background: #21262d;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+input, select, textarea {
+  font: inherit;
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: inherit;
+}
+
+/* Статус «Генерация идёт»: плавное пульсирование фона */
+.generation-status {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  position: relative;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+}
+.generation-status.running {
+  color: var(--text);
+}
+.generation-status.running::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  background: rgba(88, 166, 255, 0.12);
+  animation: generation-pulse 2.5s ease-in-out infinite;
+  pointer-events: none;
+}
+.generation-status-text {
+  position: relative;
+  z-index: 1;
+}
+@keyframes generation-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* Страница «История»: выравнивание высоты «Окно» (select) с полями дат (datetime-local) */
+.history-window-row,
+.history-datetime-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.history-window-label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.history-window-select,
+.history-datetime-row input {
+  min-height: 2.25rem;
+  box-sizing: border-box;
+}
+
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 56px;
+  height: 100vh;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  transition: width 0.2s ease;
+  overflow: hidden;
+  z-index: 50;
+}
+.app-layout.sidebar-open .sidebar {
+  width: 220px;
+}
+.page {
+  margin-left: 56px;
+  transition: margin-left 0.2s ease;
+}
+.app-layout.sidebar-open .page {
+  margin-left: 220px;
+}
+
+/* Кнопка гамбургер-меню: высота как у заголовка, прямые углы (без закругления) */
+.sidebar-toggle {
+  flex-shrink: 0;
+  width: 56px;
+  min-height: 56px;
+  height: 56px;
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  font-size: 1.4rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sidebar-toggle:hover {
+  background: #21262d;
+}
+.hamburger-icon {
+  line-height: 1;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0;
+}
+.sidebar-nav button {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  min-height: 48px;
+}
+.sidebar-nav button:hover {
+  background: #21262d;
+}
+.sidebar-nav button.active {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+  border-left: 3px solid var(--accent);
+}
+.nav-icon {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+.sidebar .icon {
+  color: inherit;
+}
+.sidebar-toggle .icon-hamburger {
+  width: 24px;
+  height: 24px;
+}
+.nav-label {
+  white-space: nowrap;
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  transition: opacity 0.2s, width 0.2s;
+}
+.app-layout.sidebar-open .nav-label {
+  opacity: 1;
+  width: auto;
+}
+
+.page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  min-width: 0;
+}
+.page-header {
+  flex-shrink: 0;
+  min-height: 56px;
+  padding: 0 1.5rem;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 1.25rem;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.page-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 1.5rem;
+  width: 100%;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.form-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.form-row label {
+  min-width: 180px;
+  color: var(--muted);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.data-table th,
+.data-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.data-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+.data-table button {
+  margin-right: 0.5rem;
+}
+.data-table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Таблица рейсов (Симуляция «Найденные рейсы» и История «История рейсов»): фиксированные ширины, Шаблон не наезжает */
+.data-table-trips {
+  width: 100%;
+  table-layout: fixed;
+  min-width: 51rem; /* 10+10+8+6.5+6.5+10 — при узком экране горизонтальный скролл вместо сжатия */
+}
+.data-table-trips th:nth-child(1),
+.data-table-trips td:nth-child(1) { width: 10rem; min-width: 10rem; white-space: nowrap; }  /* Начало */
+.data-table-trips th:nth-child(2),
+.data-table-trips td:nth-child(2) { width: 10rem; min-width: 10rem; white-space: nowrap; }  /* Конец */
+.data-table-trips th:nth-child(3),
+.data-table-trips td:nth-child(3) { width: 8rem; min-width: 8rem; white-space: nowrap; }    /* Интервал */
+.data-table-trips th:nth-child(4),
+.data-table-trips td:nth-child(4),
+.data-table-trips th:nth-child(5),
+.data-table-trips td:nth-child(5) { width: 6.5rem; min-width: 6.5rem; white-space: nowrap; } /* Порог, % и Совпадение, % — одинаковая ширина */
+.data-table-trips th.col-template,
+.data-table-trips td.col-template,
+.data-table-trips th:nth-child(6),
+.data-table-trips td:nth-child(6) {
+  min-width: 12rem;
+  width: auto; /* свободный столбец: забирает оставшееся место (История рейсов и Найденные рейсы) */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.data-table-trips td.col-template .cell-clip,
+.data-table-trips td:nth-child(6) .cell-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.data-table-trips th:nth-child(7),
+.data-table-trips td:nth-child(7) { width: 8rem; min-width: 8rem; white-space: nowrap; }   /* Действия (только История) */
+
+/* Страница «Лог» */
+.data-table-logs th:nth-child(1),
+.data-table-logs td:nth-child(1) { width: 11rem; white-space: nowrap; }
+.data-table-logs th:nth-child(2),
+.data-table-logs td:nth-child(2) { width: 7rem; white-space: nowrap; }
+.data-table-logs th:nth-child(3),
+.data-table-logs td:nth-child(3) { width: 6rem; white-space: nowrap; }
+.log-level { font-size: 0.85rem; }
+.log-level-info { color: var(--muted); }
+.log-level-warn { color: #d4a72c; }
+.log-level-error { color: var(--danger); }
+
+/* История → «История рейсов»: таблица без горизонтального скролла, столбцы в % контейнера, «Шаблон» не наезжает */
+.history-trips-table-wrap {
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 320px;
+}
+.data-table-trips-history {
+  min-width: 0;
+  width: 100%;
+  table-layout: fixed;
+}
+.data-table-trips-history th:nth-child(1),
+.data-table-trips-history td:nth-child(1) { width: 14%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.data-table-trips-history th:nth-child(2),
+.data-table-trips-history td:nth-child(2) { width: 14%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.data-table-trips-history th:nth-child(3),
+.data-table-trips-history td:nth-child(3) { width: 11%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.data-table-trips-history th:nth-child(4),
+.data-table-trips-history td:nth-child(4) { width: 8%; min-width: 0; white-space: nowrap; }
+.data-table-trips-history th:nth-child(5),
+.data-table-trips-history td:nth-child(5) { width: 10%; min-width: 0; white-space: nowrap; }
+.data-table-trips-history th:nth-child(6),
+.data-table-trips-history td:nth-child(6) {
+  width: 27%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.data-table-trips-history td:nth-child(6) .cell-clip {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.data-table-trips-history th:nth-child(7),
+.data-table-trips-history td:nth-child(7) { width: 16%; min-width: 0; white-space: nowrap; }
+
+/* Симуляция → «Найденные рейсы»: столбец «Шаблон» максимально широкий, остальные фиксированные */
+.data-table-trips-found {
+  min-width: 55rem; /* чтобы «Шаблон» не схлопывался: при узком экране будет горизонтальный скролл */
+}
+.data-table-trips-found th:nth-child(1),
+.data-table-trips-found td:nth-child(1) { width: 9.5rem; min-width: 9.5rem; white-space: nowrap; }  /* Начало */
+.data-table-trips-found th:nth-child(2),
+.data-table-trips-found td:nth-child(2) { width: 9.5rem; min-width: 9.5rem; white-space: nowrap; }  /* Конец */
+.data-table-trips-found th:nth-child(3),
+.data-table-trips-found td:nth-child(3) { width: 7.5rem; min-width: 7.5rem; white-space: nowrap; }  /* Интервал */
+.data-table-trips-found th:nth-child(4),
+.data-table-trips-found td:nth-child(4) { width: 7rem; min-width: 7rem; white-space: nowrap; }      /* Порог, % */
+.data-table-trips-found th:nth-child(5),
+.data-table-trips-found td:nth-child(5) { width: 8rem; min-width: 8rem; white-space: nowrap; }      /* Совпадение, % */
+.data-table-trips-found th.col-template,
+.data-table-trips-found td.col-template,
+.data-table-trips-found th:nth-child(6),
+.data-table-trips-found td:nth-child(6) {
+  width: auto;       /* забирает остаток */
+  min-width: 14rem;  /* но не схлопывается */
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+/* Toasts: top-right notifications */
+.toast-container {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 24rem;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: toast-in 0.2s ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(1rem); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.toast-message { flex: 1; font-size: 0.9rem; }
+.toast-success { border-left: 4px solid var(--success); }
+.toast-error { border-left: 4px solid var(--danger); }
+.toast-info { border-left: 4px solid var(--accent); }
+.toast-dismiss {
+  padding: 0.25rem;
+  min-width: 1.5rem;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+}
+.toast-dismiss:hover { color: inherit; }
+
+/* Documentation page: Markdown content */
+.doc-content h1 { font-size: 1.75rem; margin: 0 0 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+.doc-content h2 { font-size: 1.35rem; margin: 1.5rem 0 0.75rem; }
+.doc-content h3 { font-size: 1.15rem; margin: 1.25rem 0 0.5rem; }
+.doc-content h4, .doc-content h5, .doc-content h6 { font-size: 1rem; margin: 1rem 0 0.5rem; }
+.doc-content p { margin: 0 0 0.75rem; line-height: 1.6; }
+.doc-content ul, .doc-content ol { margin: 0 0 0.75rem; padding-left: 1.5rem; }
+.doc-content li { margin: 0.25rem 0; line-height: 1.5; }
+.doc-content code { background: rgba(110, 118, 129, 0.2); padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.9em; }
+.doc-content pre { background: rgba(110, 118, 129, 0.15); padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0 0 1rem; }
+.doc-content pre code { background: none; padding: 0; }
+.doc-content table { border-collapse: collapse; width: 100%; margin: 0 0 1rem; }
+.doc-content th, .doc-content td { border: 1px solid var(--border); padding: 0.5rem 0.75rem; text-align: left; }
+.doc-content th { background: rgba(110, 118, 129, 0.15); font-weight: 600; }
+.doc-content a { color: var(--accent); text-decoration: none; }
+.doc-content a:hover { text-decoration: underline; }
+.doc-content blockquote { margin: 0 0 1rem; padding-left: 1rem; border-left: 4px solid var(--border); color: var(--muted); }
+.doc-content hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
