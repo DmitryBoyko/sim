@@ -482,7 +482,7 @@ sim/
 └── README.md
 ```
 
-Подробнее про API и архитектуру: [docs/API.md](docs/API.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Подробнее про API и архитектуру: [docs/API.md](docs/API.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), а также про математику: [docs/MATH.md](docs/MATH.md).
 
 ---
 
