@@ -63,10 +63,10 @@ const OPERATIONAL_SESSION_DEFAULTS = {
   /** Ширина левой панели «Найденные рейсы» в px (правая «Фазы рейса» занимает остаток). */
   tripsPanelWidthPxV4: 900,
 }
-const TRIPS_PANEL_MIN_PX = 220
+const TRIPS_PANEL_MIN_PX = 0
 const TRIPS_PANEL_MAX_PX = 950
 const RESIZER_WIDTH_PX = 6
-const PHASES_PANEL_MIN_PX = 256
+const PHASES_PANEL_MIN_PX = 0
 
 export default function Operational() {
   const [session, setSession] = useSessionPageState('operational', OPERATIONAL_SESSION_DEFAULTS)
@@ -396,12 +396,16 @@ export default function Operational() {
       <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
         <button
           type="button"
-          className="primary"
           onClick={() => setConfirmAction('start')}
           disabled={running}
           title="Запустить генерацию"
         >
-          <svg viewBox="0 0 24 24" width={20} height={20} style={{ verticalAlign: 'middle', marginRight: '0.35rem' }} {...iconStyle}>
+          <svg
+            viewBox="0 0 24 24"
+            width={20}
+            height={20}
+            style={{ ...iconStyle, verticalAlign: 'middle', marginRight: '0.35rem', color: 'var(--success)' }}
+          >
             <path d="M5 3l14 9-14 9V3z" />
           </svg>
           Старт
@@ -412,7 +416,12 @@ export default function Operational() {
           disabled={!running}
           title="Остановить генерацию"
         >
-          <svg viewBox="0 0 24 24" width={20} height={20} style={{ verticalAlign: 'middle', marginRight: '0.35rem' }} {...iconStyle}>
+          <svg
+            viewBox="0 0 24 24"
+            width={20}
+            height={20}
+            style={{ ...iconStyle, verticalAlign: 'middle', marginRight: '0.35rem', color: 'var(--danger)' }}
+          >
             <rect x="6" y="6" width="12" height="12" />
           </svg>
           Стоп
@@ -508,15 +517,6 @@ export default function Operational() {
             <ReactECharts option={option} style={{ height: '100%', minHeight: 360 }} notMerge onEvents={{ dataZoom: onDataZoom }} />
           </div>
         </div>
-
-        <div
-          style={{
-            width: 1,
-            alignSelf: 'stretch',
-            background: 'var(--border)',
-            opacity: 0.8,
-          }}
-        />
 
         <div className="card" style={{ width: 540, flexShrink: 0 }}>
           <h3 style={{ marginTop: 0 }}>Анализ</h3>
@@ -822,8 +822,12 @@ export default function Operational() {
                   flexShrink: 0,
                   width: 22,
                   height: 22,
+                  minWidth: 22,
+                  minHeight: 22,
+                  maxWidth: 22,
+                  maxHeight: 22,
                   padding: 0,
-                  borderRadius: 999,
+                  borderRadius: '50%',
                   border: '1px solid var(--border)',
                   background: 'rgba(255, 255, 255, 0.06)',
                   color: 'var(--muted)',
@@ -834,7 +838,7 @@ export default function Operational() {
                   lineHeight: 1,
                 }}
               >
-                !
+                i
               </button>
             </div>
             {resourceHelpOpen === 'latency' && (
@@ -877,8 +881,12 @@ export default function Operational() {
                   flexShrink: 0,
                   width: 22,
                   height: 22,
+                  minWidth: 22,
+                  minHeight: 22,
+                  maxWidth: 22,
+                  maxHeight: 22,
                   padding: 0,
-                  borderRadius: 999,
+                  borderRadius: '50%',
                   border: '1px solid var(--border)',
                   background: 'rgba(255, 255, 255, 0.06)',
                   color: 'var(--muted)',
@@ -889,7 +897,7 @@ export default function Operational() {
                   lineHeight: 1,
                 }}
               >
-                !
+                i
               </button>
             </div>
             {resourceHelpOpen === 'errors' && (
@@ -935,8 +943,12 @@ export default function Operational() {
                   flexShrink: 0,
                   width: 22,
                   height: 22,
+                  minWidth: 22,
+                  minHeight: 22,
+                  maxWidth: 22,
+                  maxHeight: 22,
                   padding: 0,
-                  borderRadius: 999,
+                  borderRadius: '50%',
                   border: '1px solid var(--border)',
                   background: 'rgba(255, 255, 255, 0.06)',
                   color: 'var(--muted)',
@@ -947,7 +959,7 @@ export default function Operational() {
                   lineHeight: 1,
                 }}
               >
-                !
+                i
               </button>
             </div>
             {resourceHelpOpen === 'ws' && (
@@ -1003,8 +1015,12 @@ export default function Operational() {
                       flexShrink: 0,
                       width: 22,
                       height: 22,
+                      minWidth: 22,
+                      minHeight: 22,
+                      maxWidth: 22,
+                      maxHeight: 22,
                       padding: 0,
-                      borderRadius: 999,
+                      borderRadius: '50%',
                       border: '1px solid var(--border)',
                       background: 'rgba(255, 255, 255, 0.06)',
                       color: 'var(--muted)',
@@ -1015,7 +1031,7 @@ export default function Operational() {
                       lineHeight: 1,
                     }}
                   >
-                    !
+                    i
                   </button>
                 </div>
                 {resourceHelpOpen === 'memory' && (
@@ -1059,8 +1075,12 @@ export default function Operational() {
                       flexShrink: 0,
                       width: 22,
                       height: 22,
+                      minWidth: 22,
+                      minHeight: 22,
+                      maxWidth: 22,
+                      maxHeight: 22,
                       padding: 0,
-                      borderRadius: 999,
+                      borderRadius: '50%',
                       border: '1px solid var(--border)',
                       background: 'rgba(255, 255, 255, 0.06)',
                       color: 'var(--muted)',
@@ -1071,7 +1091,7 @@ export default function Operational() {
                       lineHeight: 1,
                     }}
                   >
-                    !
+                    i
                   </button>
                 </div>
                 {resourceHelpOpen === 'goroutines' && (
