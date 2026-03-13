@@ -4,10 +4,53 @@ import * as api from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useSessionPageState } from '../sessionState'
 import { logError } from '../lib/frontendLog'
-import { formatDateTime, formatDurationSeconds, formatTripInterval, formatMs, round1 } from '../utils/format'
-import type { AppSettings, DataPoint, DetectedTrip, OperationalStats, RecognitionAnalysisState } from '../api'
+import { formatDateTime, formatDateTimeShortYear, formatDurationSeconds, formatTripInterval, formatMs, round1 } from '../utils/format'
+import type { AppSettings, DataPoint, DetectedTrip, OperationalStats, RecognitionAnalysisState, TripPhase, ResourceStatus } from '../api'
+
+const resourceStatusBg: Record<ResourceStatus, string> = {
+  green: 'var(--success-bg)',
+  yellow: 'var(--warning-bg)',
+  red: 'var(--danger-bg)',
+}
+const resourceStatusColor: Record<ResourceStatus, string> = {
+  green: 'var(--success)',
+  yellow: 'var(--warning)',
+  red: 'var(--danger)',
+}
+const resourceStatusLabel: Record<ResourceStatus, string> = {
+  green: 'в норме',
+  yellow: 'насторожиться',
+  red: 'на пределе',
+}
+const metricRowStyle: React.CSSProperties = {
+  margin: '0.35rem 0',
+  fontSize: '0.95rem',
+  padding: '0.35rem 0.5rem',
+  borderRadius: 4,
+  background: 'rgba(255, 255, 255, 0.06)',
+}
 
 const CHART_MINUTES_OPTIONS = [30, 60, 90, 120] as const
+
+const phaseTypeLabel: Record<string, string> = {
+  loading: 'Погрузка',
+  transport: 'Транспортировка',
+  unloading: 'Разгрузка',
+  return: 'Возврат',
+}
+const phaseTypeColor: Record<string, string> = {
+  loading: '#F59E0B',
+  transport: '#10B981',
+  unloading: '#EF4444',
+  return: '#3B82F6',
+}
+
+function getPhaseType(ph: { phase_type?: string; phase?: string }): string {
+  const t = ph.phase_type ?? ph.phase ?? ''
+  if (t === 'load') return 'loading'
+  if (t === 'unload') return 'unloading'
+  return t
+}
 const TRIPS_LIMIT_OPTIONS = [10, 20, 50] as const
 
 const iconStyle = { stroke: 'currentColor', fill: 'none' as const, strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
@@ -17,11 +60,22 @@ const OPERATIONAL_SESSION_DEFAULTS = {
   tripsLimit: 10,
   showChartPoints: false,
   showSlideZone: false,
+  /** Ширина левой панели «Найденные рейсы» в px (правая «Фазы рейса» занимает остаток). */
+  tripsPanelWidthPxV4: 900,
 }
+const TRIPS_PANEL_MIN_PX = 220
+const TRIPS_PANEL_MAX_PX = 950
+const RESIZER_WIDTH_PX = 6
+const PHASES_PANEL_MIN_PX = 256
 
 export default function Operational() {
   const [session, setSession] = useSessionPageState('operational', OPERATIONAL_SESSION_DEFAULTS)
-  const { chartMinutes, tripsLimit, showChartPoints, showSlideZone } = session
+  const { chartMinutes, tripsLimit, showChartPoints, showSlideZone, tripsPanelWidthPxV4 } = session
+  const tripsPhasesContainerRef = useRef<HTMLDivElement>(null)
+  const tripsTableWrapperRef = useRef<HTMLDivElement>(null)
+  const resizeStartX = useRef(0)
+  const resizeStartWidth = useRef(0)
+  const [resizing, setResizing] = useState(false)
 
   const [points, setPoints] = useState<DataPoint[]>([])
   const [trips, setTrips] = useState<DetectedTrip[]>([])
@@ -34,6 +88,12 @@ export default function Operational() {
   const [selectedTo, setSelectedTo] = useState<number | null>(null)
   const [stats, setStats] = useState<OperationalStats | null>(null)
   const [statsTick, setStatsTick] = useState(0)
+  const [lastApiLatencyMs, setLastApiLatencyMs] = useState<number | null>(null)
+  const [apiErrorCount, setApiErrorCount] = useState(0)
+  const [resourceHelpOpen, setResourceHelpOpen] = useState<null | 'memory' | 'goroutines' | 'latency' | 'errors' | 'ws'>(null)
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(null)
+  const [selectedTripPhases, setSelectedTripPhases] = useState<TripPhase[] | null>(null)
+  const [loadingPhases, setLoadingPhases] = useState(false)
   const zoomRef = useRef<{ start: number; end: number } | null>(null)
   const tripsLimitRef = useRef(tripsLimit)
   tripsLimitRef.current = tripsLimit
@@ -56,7 +116,26 @@ export default function Operational() {
     }
   }, [tripsLimit])
 
-  useWebSocket({
+  const handleSelectTrip = useCallback((t: DetectedTrip) => {
+    const id = t.id
+    setSelectedTripId(id)
+    const fromTrip = t.phases && Array.isArray(t.phases) && t.phases.length > 0
+    if (fromTrip) {
+      setSelectedTripPhases(t.phases as unknown as TripPhase[])
+      return
+    }
+    setSelectedTripPhases(null)
+    setLoadingPhases(true)
+    api.getTripPhases(id).then((r) => {
+      setSelectedTripPhases(r.phases ?? null)
+    }).catch(() => {
+      setSelectedTripPhases(null)
+    }).finally(() => {
+      setLoadingPhases(false)
+    })
+  }, [])
+
+  const { connected: wsConnected } = useWebSocket({
     onPoint: (p) => {
       setPoints((prev) => {
         const next = [...prev, p]
@@ -73,6 +152,7 @@ export default function Operational() {
           template_name: t.template_name,
           match_threshold_percent: t.match_threshold_percent,
           match_percent: t.match_percent,
+          transport_avg_weight_ton: t.transport_avg_weight_ton ?? null,
           phases: t.phases,
           created_at: new Date().toISOString(),
         },
@@ -102,12 +182,41 @@ export default function Operational() {
     return () => clearInterval(id)
   }, [running])
 
+  useEffect(() => {
+    if (!resizing) return
+    const container = tripsPhasesContainerRef.current
+    const onMove = (e: MouseEvent) => {
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const maxLeft = rect.width - RESIZER_WIDTH_PX - PHASES_PANEL_MIN_PX
+      const deltaX = e.clientX - resizeStartX.current
+      const next = Math.round(
+        Math.max(TRIPS_PANEL_MIN_PX, Math.min(maxLeft, resizeStartWidth.current + deltaX))
+      )
+      setSession({ tripsPanelWidthPxV4: next })
+    }
+    const onUp = () => setResizing(false)
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [resizing, setSession])
+
   const loadStats = useCallback(async () => {
+    const t0 = Date.now()
     try {
       const data = await api.getOperationalStats()
+      setLastApiLatencyMs(Date.now() - t0)
       setStats(data)
       setRunning(data.running)
     } catch (e) {
+      setApiErrorCount((c) => c + 1)
       logError('Operational stats load failed', {
         component: 'Operational',
         function: 'loadStats',
@@ -396,15 +505,41 @@ export default function Operational() {
             </label>
           </div>
           <div style={{ flex: 1, minHeight: 360 }}>
-            <ReactECharts option={option} style={{ height: '100%', minHeight: 360 }} opts={{ notMerge: true }} onEvents={{ dataZoom: onDataZoom }} />
+            <ReactECharts option={option} style={{ height: '100%', minHeight: 360 }} notMerge onEvents={{ dataZoom: onDataZoom }} />
           </div>
         </div>
+
+        <div
+          style={{
+            width: 1,
+            alignSelf: 'stretch',
+            background: 'var(--border)',
+            opacity: 0.8,
+          }}
+        />
 
         <div className="card" style={{ width: 540, flexShrink: 0 }}>
           <h3 style={{ marginTop: 0 }}>Анализ</h3>
           {analysis ? (
             <>
               <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: 6, padding: '0.75rem 1rem', marginBottom: '0.75rem' }}>
+                {analysis.normalization_mode && (
+                  <p style={{ margin: '0.5rem 0', fontSize: '0.95rem' }}>
+                    <strong>Режим нормализации:</strong>{' '}
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: 4,
+                        fontSize: '0.9rem',
+                        backgroundColor: analysis.normalization_mode === 'z-norm' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(107, 114, 128, 0.25)',
+                        color: analysis.normalization_mode === 'z-norm' ? 'var(--primary, #60a5fa)' : 'var(--muted)',
+                      }}
+                    >
+                      {analysis.normalization_mode === 'z-norm' ? 'Z-нормализация' : 'Min-Max вектор'}
+                    </span>
+                  </p>
+                )}
                 <p style={{ margin: '0.5rem 0', fontSize: '0.95rem' }}>
                   <strong>Загружено шаблонов:</strong> {analysis.templates_loaded}
                 </p>
@@ -457,53 +592,177 @@ export default function Operational() {
       </div>
 
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'stretch', marginTop: '1rem', minHeight: 0 }}>
-        <div className="card" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <h3 style={{ marginTop: 0 }}>Найденные рейсы</h3>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-            <span style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Показать последние:</span>
-            {TRIPS_LIMIT_OPTIONS.map((n) => (
-              <button
-                key={n}
-                type="button"
-                className={tripsLimit === n ? 'primary' : ''}
-                onClick={() => {
-                  setSession({ tripsLimit: n })
-                }}
-              >
-                {n}
-              </button>
-            ))}
-          </div>
-          <div style={{ overflowX: 'auto', flex: 1, minHeight: 0 }}>
-            <table className="data-table data-table-trips data-table-trips-found">
-              <thead>
-                <tr>
-                  <th>Начало</th>
-                  <th>Конец</th>
-                  <th>Интервал</th>
-                  <th>Порог, %</th>
-                  <th>Совпадение, %</th>
-                  <th className="col-template">Шаблон</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trips.length === 0 && (
+        <div
+          ref={tripsPhasesContainerRef}
+          style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'stretch' }}
+        >
+          <div
+            className="card"
+            style={{
+              width: Math.max(TRIPS_PANEL_MIN_PX, Math.min(TRIPS_PANEL_MAX_PX, Number(tripsPanelWidthPxV4) ?? OPERATIONAL_SESSION_DEFAULTS.tripsPanelWidthPxV4)),
+              minWidth: TRIPS_PANEL_MIN_PX,
+              flexShrink: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'nowrap', marginBottom: '0.75rem' }}>
+              <h3 style={{ marginTop: 0, marginBottom: 0, flexShrink: 0 }}>Найденные рейсы</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem', flexShrink: 0 }}>
+                Показать последние:
+                <select
+                  value={tripsLimit}
+                  onChange={(e) => {
+                    setSession({ tripsLimit: Number(e.target.value) })
+                  }}
+                  aria-label="Показать последние рейсы"
+                >
+                  {TRIPS_LIMIT_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div
+              ref={tripsTableWrapperRef}
+              role="grid"
+              aria-label="Найденные рейсы"
+              tabIndex={0}
+              style={{ overflowX: 'auto', flex: 1, minHeight: 0, outline: 'none' }}
+              onKeyDown={(e) => {
+                if (trips.length === 0) return
+                if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+                e.preventDefault()
+                const idx = selectedTripId ? trips.findIndex((t) => t.id === selectedTripId) : -1
+                let nextIdx: number
+                if (e.key === 'ArrowDown') {
+                  nextIdx = idx < trips.length - 1 ? idx + 1 : (idx < 0 ? 0 : idx)
+                } else {
+                  nextIdx = idx > 0 ? idx - 1 : (idx < 0 ? trips.length - 1 : idx)
+                }
+                if (nextIdx >= 0 && nextIdx < trips.length) handleSelectTrip(trips[nextIdx])
+              }}
+            >
+              <table className="data-table data-table-trips data-table-trips-found">
+                <thead>
                   <tr>
-                    <td colSpan={6} style={{ color: 'var(--muted)' }}>Нет найденных рейсов</td>
+                    <th>Начало</th>
+                    <th>Конец</th>
+                    <th>Интервал</th>
+                    <th>Порог, %</th>
+                    <th>Совпадение, %</th>
+                    <th className="col-template">Шаблон</th>
+                    <th>Ср. вес (трансп.)</th>
                   </tr>
-                )}
-                {trips.map((t) => (
-                  <tr key={t.id}>
-                    <td>{formatDateTime(t.started_at)}</td>
-                    <td>{formatDateTime(t.ended_at)}</td>
-                    <td>{formatTripInterval(t.started_at, t.ended_at)}</td>
-                    <td>{t.match_threshold_percent != null ? `${t.match_threshold_percent.toFixed(0)}%` : '—'}</td>
-                    <td>{t.match_percent.toFixed(1)}%</td>
-                    <td className="col-template"><span className="cell-clip">{t.template_name || 'не найден'}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {trips.length === 0 && (
+                    <tr>
+                      <td colSpan={7} style={{ color: 'var(--muted)' }}>Нет найденных рейсов</td>
+                    </tr>
+                  )}
+                  {trips.map((t) => (
+                      <tr
+                        key={t.id}
+                        onClick={() => {
+                          tripsTableWrapperRef.current?.focus()
+                          handleSelectTrip(t)
+                        }}
+                        className={selectedTripId === t.id ? 'selected' : ''}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <td>{formatDateTimeShortYear(t.started_at)}</td>
+                        <td>{formatDateTimeShortYear(t.ended_at)}</td>
+                        <td>{formatTripInterval(t.started_at, t.ended_at)}</td>
+                        <td>{t.match_threshold_percent != null ? `${t.match_threshold_percent.toFixed(0)}%` : '—'}</td>
+                        <td>{t.match_percent.toFixed(1)}%</td>
+                        <td className="col-template"><span className="cell-clip" title={t.template_name || 'не найден'}>{t.template_name || 'не найден'}</span></td>
+                        <td>{t.transport_avg_weight_ton != null ? `${round1(t.transport_avg_weight_ton)} т` : '—'}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div
+            role="separator"
+            aria-label="Изменить ширину секций"
+            tabIndex={0}
+            onMouseDown={(e) => {
+              resizeStartX.current = e.clientX
+              resizeStartWidth.current = Math.max(
+                TRIPS_PANEL_MIN_PX,
+                Math.min(TRIPS_PANEL_MAX_PX, Number(tripsPanelWidthPxV4) ?? OPERATIONAL_SESSION_DEFAULTS.tripsPanelWidthPxV4)
+              )
+              setResizing(true)
+            }}
+            style={{
+              width: RESIZER_WIDTH_PX,
+              flexShrink: 0,
+              cursor: 'col-resize',
+              background: 'transparent',
+              alignSelf: 'stretch',
+            }}
+          />
+
+          <div className="card" style={{ flex: 1, minWidth: PHASES_PANEL_MIN_PX, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <h3 style={{ marginTop: 0 }}>Фазы рейса</h3>
+            {!selectedTripId ? (
+              <p style={{ color: 'var(--muted)', margin: 0 }}>Выберите рейс в таблице слева</p>
+            ) : loadingPhases ? (
+              <p style={{ color: 'var(--muted)', margin: 0 }}>Загрузка фаз…</p>
+            ) : selectedTripPhases && selectedTripPhases.length > 0 ? (
+              <div style={{ overflowX: 'auto', flex: 1, minHeight: 0 }}>
+                <table className="data-table operational-phases-table">
+                  <thead>
+                    <tr>
+                      <th>Фаза</th>
+                      <th>Начало</th>
+                      <th>Конец</th>
+                      <th>Длительность</th>
+                      <th>Ср. скорость</th>
+                      <th>Ср. вес</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedTripPhases.map((ph, i) => {
+                      const phaseType = getPhaseType(ph)
+                      const phaseColor = phaseTypeColor[phaseType] ?? '#888'
+                      return (
+                        <tr key={i}>
+                          <td className="phase-cell-with-bar" style={{ position: 'relative', paddingLeft: 14 }}>
+                            <span
+                              className="phase-row-bar"
+                              style={{
+                                position: 'absolute',
+                                left: 0,
+                                top: 0,
+                                bottom: 0,
+                                width: 6,
+                                backgroundColor: phaseColor,
+                                borderRadius: 2,
+                              }}
+                            />
+                            {phaseTypeLabel[phaseType] ?? phaseType}
+                          </td>
+                          <td>{formatDateTimeShortYear(ph.started_at ?? '')}</td>
+                          <td>{formatDateTimeShortYear(ph.ended_at ?? '')}</td>
+                          <td>{formatDurationSeconds(ph.duration_sec ?? 0)}</td>
+                          <td>{round1(ph.avg_speed_kmh ?? 0)} км/ч</td>
+                          <td>{round1(ph.avg_weight_ton ?? 0)} т</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p style={{ color: 'var(--muted)', margin: 0 }}>Нет данных о фазах</p>
+            )}
           </div>
         </div>
 
@@ -511,32 +770,328 @@ export default function Operational() {
         <h3 style={{ marginTop: 0 }}>Статистика</h3>
         {stats ? (
           <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: 6, padding: '0.75rem 1rem' }}>
-            <p style={{ margin: '0.5rem 0', fontSize: '0.95rem' }}>
+            <p style={{ margin: '0 0 0.35rem', fontSize: '0.9rem', color: 'var(--muted)' }}>Сеанс</p>
+            <p style={metricRowStyle}>
               <strong>Последний запуск:</strong>{' '}
-              {stats.last_started_at ? formatDateTime(stats.last_started_at) : '—'}
+              {stats.last_started_at ? formatDateTimeShortYear(stats.last_started_at) : '—'}
             </p>
-            <p style={{ margin: '0.5rem 0', fontSize: '0.95rem' }}>
+            <p style={metricRowStyle}>
               <strong>Длительность сеанса:</strong>{' '}
               {stats.last_started_at && running
                 ? formatDurationSeconds((Date.now() - new Date(stats.last_started_at).getTime()) / 1000)
                 : '—'}
             </p>
-            <p style={{ margin: '0.5rem 0', fontSize: '0.95rem' }}>
+            <p style={metricRowStyle}>
               <strong>Точек (скорость):</strong> {stats.points_since_start.toLocaleString()}
             </p>
-            <p style={{ margin: '0.5rem 0', fontSize: '0.95rem' }}>
+            <p style={metricRowStyle}>
               <strong>Точек (вес):</strong> {stats.points_since_start.toLocaleString()}
             </p>
-            <p style={{ margin: '0.5rem 0', fontSize: '0.95rem' }}>
+            <p style={metricRowStyle}>
               <strong>Рейсов найдено:</strong> {stats.trips_since_start.toLocaleString()}
             </p>
-            <p style={{ margin: '0.5rem 0', fontSize: '0.95rem' }}>
+            <p style={metricRowStyle}>
               <strong>Активных процессов:</strong> {stats.active_jobs_count}
             </p>
             {stats.last_trip_at && (
-              <p style={{ margin: '0.5rem 0', fontSize: '0.95rem' }}>
-                <strong>Последний рейс:</strong> {formatDateTime(stats.last_trip_at)}
+              <p style={metricRowStyle}>
+                <strong>Последний рейс:</strong> {formatDateTimeShortYear(stats.last_trip_at)}
               </p>
+            )}
+            <p style={{ margin: '0.75rem 0 0.35rem', fontSize: '0.9rem', color: 'var(--muted)' }}>Взаимодействие с бэкендом</p>
+
+            <div
+              style={{
+                ...metricRowStyle,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <strong>Время ответа API:</strong>{' '}
+                {lastApiLatencyMs != null ? `${lastApiLatencyMs} мс` : '—'}
+              </div>
+              <button
+                type="button"
+                onClick={() => setResourceHelpOpen((v) => (v === 'latency' ? null : 'latency'))}
+                aria-label="Справка по метрике Время ответа API"
+                title="Справка"
+                style={{
+                  flexShrink: 0,
+                  width: 22,
+                  height: 22,
+                  padding: 0,
+                  borderRadius: 999,
+                  border: '1px solid var(--border)',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  color: 'var(--muted)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 700,
+                  lineHeight: 1,
+                }}
+              >
+                !
+              </button>
+            </div>
+            {resourceHelpOpen === 'latency' && (
+              <div
+                style={{
+                  marginTop: '-0.15rem',
+                  marginBottom: '0.35rem',
+                  padding: '0.5rem 0.6rem',
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  color: 'var(--muted)',
+                  fontSize: '0.85rem',
+                  lineHeight: 1.35,
+                  background: 'rgba(255, 255, 255, 0.03)',
+                }}
+              >
+                Показывает время ответа основных API-запросов панели. Увеличение значения может указывать на нагрузку на бэкенд,
+                проблемы сети или блокирующие операции.
+              </div>
+            )}
+
+            <div
+              style={{
+                ...metricRowStyle,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <strong>Ошибок API за сессию:</strong> {apiErrorCount}
+              </div>
+              <button
+                type="button"
+                onClick={() => setResourceHelpOpen((v) => (v === 'errors' ? null : 'errors'))}
+                aria-label="Справка по метрике Ошибок API за сессию"
+                title="Справка"
+                style={{
+                  flexShrink: 0,
+                  width: 22,
+                  height: 22,
+                  padding: 0,
+                  borderRadius: 999,
+                  border: '1px solid var(--border)',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  color: 'var(--muted)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 700,
+                  lineHeight: 1,
+                }}
+              >
+                !
+              </button>
+            </div>
+            {resourceHelpOpen === 'errors' && (
+              <div
+                style={{
+                  marginTop: '-0.15rem',
+                  marginBottom: '0.35rem',
+                  padding: '0.5rem 0.6rem',
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  color: 'var(--muted)',
+                  fontSize: '0.85rem',
+                  lineHeight: 1.35,
+                  background: 'rgba(255, 255, 255, 0.03)',
+                }}
+              >
+                Считает количество ошибок при вызовах API за текущий сеанс панели. Рост значения говорит о нестабильности
+                сервисов или проблемах с сетью.
+              </div>
+            )}
+
+            <div
+              style={{
+                ...metricRowStyle,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <strong>WebSocket:</strong>{' '}
+                <span style={{ color: wsConnected ? 'var(--success)' : 'var(--muted)' }}>
+                  {wsConnected ? 'подключён' : 'отключён'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResourceHelpOpen((v) => (v === 'ws' ? null : 'ws'))}
+                aria-label="Справка по метрике WebSocket"
+                title="Справка"
+                style={{
+                  flexShrink: 0,
+                  width: 22,
+                  height: 22,
+                  padding: 0,
+                  borderRadius: 999,
+                  border: '1px solid var(--border)',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  color: 'var(--muted)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 700,
+                  lineHeight: 1,
+                }}
+              >
+                !
+              </button>
+            </div>
+            {resourceHelpOpen === 'ws' && (
+              <div
+                style={{
+                  marginTop: '-0.15rem',
+                  marginBottom: '0.35rem',
+                  padding: '0.5rem 0.6rem',
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  color: 'var(--muted)',
+                  fontSize: '0.85rem',
+                  lineHeight: 1.35,
+                  background: 'rgba(255, 255, 255, 0.03)',
+                }}
+              >
+                Показывает состояние постоянного соединения с бэкендом для онлайн-обновления данных. При отключении часть
+                оперативных метрик может обновляться с задержкой или не обновляться до восстановления соединения.
+              </div>
+            )}
+            {(stats.memory_alloc_mb != null || stats.num_goroutine != null) && (
+              <>
+                <p style={{ margin: '0.75rem 0 0.35rem', fontSize: '0.9rem', color: 'var(--muted)' }}>
+                  Ресурсы бэкенда{' '}
+                  {stats.resource_status && (
+                    <span style={{ color: resourceStatusColor[stats.resource_status], fontWeight: 600 }}>
+                      {resourceStatusLabel[stats.resource_status]}
+                    </span>
+                  )}
+                </p>
+
+                <div
+                  style={{
+                    ...metricRowStyle,
+                    background: stats.memory_status ? resourceStatusBg[stats.memory_status] : metricRowStyle.background,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem',
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <strong>Память (heap):</strong>{' '}
+                    {stats.memory_alloc_mb != null ? `${stats.memory_alloc_mb.toFixed(2)} МБ` : '—'}
+                    {stats.memory_sys_mb != null && ` (sys: ${stats.memory_sys_mb.toFixed(2)} МБ)`}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setResourceHelpOpen((v) => (v === 'memory' ? null : 'memory'))}
+                    aria-label="Справка по метрике Память (heap)"
+                    title="Справка"
+                    style={{
+                      flexShrink: 0,
+                      width: 22,
+                      height: 22,
+                      padding: 0,
+                      borderRadius: 999,
+                      border: '1px solid var(--border)',
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      color: 'var(--muted)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 700,
+                      lineHeight: 1,
+                    }}
+                  >
+                    !
+                  </button>
+                </div>
+                {resourceHelpOpen === 'memory' && (
+                  <div
+                    style={{
+                      marginTop: '-0.15rem',
+                      marginBottom: '0.35rem',
+                      padding: '0.5rem 0.6rem',
+                      borderRadius: 6,
+                      border: '1px solid var(--border)',
+                      color: 'var(--muted)',
+                      fontSize: '0.85rem',
+                      lineHeight: 1.35,
+                      background: 'rgba(255, 255, 255, 0.03)',
+                    }}
+                  >
+                    Пороговые уровни для heap-памяти: зелёный — &lt; 150 МБ; жёлтый — 150–400 МБ; красный — &gt; 400 МБ. Значение{' '}
+                    <em>sys</em> — объём памяти, полученный рантаймом у ОС.
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    ...metricRowStyle,
+                    background: stats.goroutines_status ? resourceStatusBg[stats.goroutines_status] : metricRowStyle.background,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem',
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <strong>Горутины:</strong> {stats.num_goroutine ?? '—'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setResourceHelpOpen((v) => (v === 'goroutines' ? null : 'goroutines'))}
+                    aria-label="Справка по метрике Горутины"
+                    title="Справка"
+                    style={{
+                      flexShrink: 0,
+                      width: 22,
+                      height: 22,
+                      padding: 0,
+                      borderRadius: 999,
+                      border: '1px solid var(--border)',
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      color: 'var(--muted)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 700,
+                      lineHeight: 1,
+                    }}
+                  >
+                    !
+                  </button>
+                </div>
+                {resourceHelpOpen === 'goroutines' && (
+                  <div
+                    style={{
+                      marginTop: '-0.15rem',
+                      marginBottom: '0.35rem',
+                      padding: '0.5rem 0.6rem',
+                      borderRadius: 6,
+                      border: '1px solid var(--border)',
+                      color: 'var(--muted)',
+                      fontSize: '0.85rem',
+                      lineHeight: 1.35,
+                      background: 'rgba(255, 255, 255, 0.03)',
+                    }}
+                  >
+                    Пороговые уровни для количества горутин: зелёный — &lt; 100; жёлтый — 100–300; красный — &gt; 300. Резкий рост может указывать на утечки задач или зависшие операции.
+                  </div>
+                )}
+              </>
             )}
           </div>
         ) : (

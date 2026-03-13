@@ -5,6 +5,14 @@ export function formatDateTime(dateStr: string | number | Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
+/** Время с годом в две цифры: "DD.MM.YY HH:mm:ss" (компактно для таблиц) */
+export function formatDateTimeShortYear(dateStr: string | number | Date): string {
+  const d = new Date(dateStr)
+  const pad = (n: number) => (n < 10 ? '0' + n : String(n))
+  const yy = String(d.getFullYear()).slice(-2)
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${yy} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
 /** Значение для input type="datetime-local" (локальное время) */
 export function toDateTimeLocalValue(dateStr: string | number | Date): string {
   const d = new Date(dateStr)

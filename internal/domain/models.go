@@ -64,6 +64,19 @@ type RecognitionConfig struct {
 	SpeedBaselineKmh float64 `json:"speed_baseline_kmh" mapstructure:"speed_baseline_kmh"`
 	// WeightBaselineTon — макс. вес (т), при котором считаем «порожний» у оси. 0 = не проверять.
 	WeightBaselineTon float64 `json:"weight_baseline_ton" mapstructure:"weight_baseline_ton"`
+	// UseZNormalization — true: Z-нормализация (форма сигнала); false: Min-Max вектор (по умолчанию).
+	UseZNormalization bool `json:"use_z_normalization" mapstructure:"use_z_normalization"`
+}
+
+// AnalysisConfig — параметры анализа фаз рейса и веса груза (Plateau Detection).
+type AnalysisConfig struct {
+	PlateauHalfWindow        int     `json:"plateau_half_window" mapstructure:"plateau_half_window"`
+	PlateauNoiseToleranceTon float64 `json:"plateau_noise_tolerance_ton" mapstructure:"plateau_noise_tolerance_ton"`
+	PayloadThresholdTon     float64 `json:"payload_threshold_ton" mapstructure:"payload_threshold_ton"`
+	MinPhasePoints          int     `json:"min_phase_points" mapstructure:"min_phase_points"`
+	PlateauEdgeDilationEnabled bool `json:"plateau_edge_dilation_enabled" mapstructure:"plateau_edge_dilation_enabled"`
+	PlateauGapClosingEnabled   bool `json:"plateau_gap_closing_enabled" mapstructure:"plateau_gap_closing_enabled"`
+	PlateauMaxGapPoints        int  `json:"plateau_max_gap_points" mapstructure:"plateau_max_gap_points"`
 }
 
 // AppSettings — все настройки приложения.
@@ -73,6 +86,7 @@ type AppSettings struct {
 	Noise       NoiseConfig       `json:"noise"`
 	Intervals   IntervalsConfig   `json:"intervals"`
 	Recognition RecognitionConfig `json:"recognition"`
+	Analysis    AnalysisConfig    `json:"analysis"`
 }
 
 // TripTemplate — шаблон рейса (без вектора).
@@ -92,25 +106,42 @@ type TripTemplate struct {
 // TripTemplateWithVector — шаблон с вектором для сравнения.
 type TripTemplateWithVector struct {
 	TripTemplate
-	Vector []float64 `json:"vector"`
+	Vector  []float64 `json:"vector"`
+	ZVector []float64 `json:"zvector,omitempty"` // Z-нормализованный вектор (для режима use_z_normalization).
 }
 
 // DetectedTrip — найденный рейс.
 type DetectedTrip struct {
-	ID                   string       `json:"id"`
-	StartedAt            time.Time    `json:"started_at"`
-	EndedAt              time.Time    `json:"ended_at"`
-	TemplateID           *string      `json:"template_id,omitempty"`
-	TemplateName         string       `json:"template_name,omitempty"`
-	MatchThresholdPercent *float64    `json:"match_threshold_percent,omitempty"` // порог из настроек на момент обнаружения
-	MatchPercent         float64      `json:"match_percent"`
-	Phases               []PhaseSpan  `json:"phases,omitempty"`
-	CreatedAt            time.Time    `json:"created_at"`
+	ID                    string        `json:"id"`
+	StartedAt             time.Time     `json:"started_at"`
+	EndedAt               time.Time     `json:"ended_at"`
+	TemplateID            *string       `json:"template_id,omitempty"`
+	TemplateName          string        `json:"template_name,omitempty"`
+	MatchThresholdPercent *float64      `json:"match_threshold_percent,omitempty"`
+	MatchPercent          float64       `json:"match_percent"`
+	PayloadTon              *float64      `json:"payload_ton,omitempty"`
+	TransportAvgWeightTon  *float64      `json:"transport_avg_weight_ton,omitempty"` // средний вес фазы «Транспортировка» (из trip_phases)
+	Phases                 []PhaseSpan   `json:"-"`                // legacy, не в API
+	AnalysisPhases         []TripPhase   `json:"phases,omitempty"`  // фазы анализа для API/WS
+	CreatedAt              time.Time     `json:"created_at"`
 }
 
-// PhaseSpan — временной отрезок фазы.
+// PhaseSpan — временной отрезок фазы (legacy).
 type PhaseSpan struct {
 	Phase string    `json:"phase"`
 	From  time.Time `json:"from"`
 	To    time.Time `json:"to"`
+}
+
+// TripPhase — фаза рейса по анализу (таблица trip_phases, API).
+// phase_type: loading, transport, unloading, return.
+type TripPhase struct {
+	PhaseType   string    `json:"phase_type"`
+	StartedAt   time.Time `json:"started_at"`
+	EndedAt     time.Time `json:"ended_at"`
+	DurationSec int       `json:"duration_sec"`
+	AvgSpeedKmh  float64   `json:"avg_speed_kmh"`
+	AvgWeightTon float64  `json:"avg_weight_ton"`
+	PointCount  int       `json:"point_count"`
+	SortOrder   int       `json:"sort_order"`
 }

@@ -44,6 +44,7 @@ type AnalysisState struct {
 	Comparisons           []TemplateComparisonResult `json:"comparisons,omitempty"`
 	WindowIntervalStart   string                    `json:"window_interval_start,omitempty"`
 	WindowIntervalEnd     string                    `json:"window_interval_end,omitempty"`
+	NormalizationMode     string                    `json:"normalization_mode"` // "min-max" или "z-norm"
 }
 
 // Service does sliding-window trip recognition. Window sizes are taken from templates (max over all).
@@ -61,6 +62,7 @@ type Service struct {
 	cooldownSec       int
 	speedBaselineKmh  float64 // 0 = не проверять конец/начало у оси
 	weightBaselineTon float64
+	useZNormalization bool
 	templates         []domain.TripTemplateWithVector // sorted by (SpeedCount, WeightCount) ascending
 	provider     TemplateProvider
 	saver        TripSaver
@@ -74,17 +76,18 @@ type Service struct {
 // NewService creates recognition service. Window sizes are set from templates in RefreshTemplates.
 func NewService(provider TemplateProvider, saver TripSaver, threshold float64) *Service {
 	return &Service{
-		speedWindow: make([]float64, 0, 256),
-		weightWindow: make([]float64, 0, 256),
-		timeWindow:   make([]time.Time, 0, 256),
-		threshold:    threshold,
-		provider:     provider,
-		saver:        saver,
+		speedWindow:        make([]float64, 0, 256),
+		weightWindow:       make([]float64, 0, 256),
+		timeWindow:         make([]time.Time, 0, 256),
+		threshold:          threshold,
+		provider:           provider,
+		saver:              saver,
+		lastState:          AnalysisState{NormalizationMode: "min-max"},
 	}
 }
 
-// UpdateConfig updates threshold, enabled, cooldown and baseline limits. Window sizes are from templates.
-func (s *Service) UpdateConfig(threshold float64, enabled bool, cooldownSec int, speedBaselineKmh, weightBaselineTon float64) {
+// UpdateConfig updates threshold, enabled, cooldown, baseline limits and normalization mode. Window sizes are from templates.
+func (s *Service) UpdateConfig(threshold float64, enabled bool, cooldownSec int, speedBaselineKmh, weightBaselineTon float64, useZNormalization bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.threshold = threshold
@@ -95,6 +98,12 @@ func (s *Service) UpdateConfig(threshold float64, enabled bool, cooldownSec int,
 	s.cooldownSec = cooldownSec
 	s.speedBaselineKmh = speedBaselineKmh
 	s.weightBaselineTon = weightBaselineTon
+	s.useZNormalization = useZNormalization
+	if s.useZNormalization {
+		s.lastState.NormalizationMode = "z-norm"
+	} else {
+		s.lastState.NormalizationMode = "min-max"
+	}
 }
 
 // atBaseline returns true if (speed, weight) считаются «у оси» по заданным порогам. Если оба порога 0 — проверка отключена (true).
@@ -249,13 +258,21 @@ func (s *Service) OnPoint(ctx context.Context, p domain.DataPoint) {
 		s.mu.Unlock()
 
 		t0 := time.Now()
-		operVector := vector.BuildVectorFromSeries(useSpeed, useWeight)
+		var operVector []float64
+		var templateVec []float64
+		if s.useZNormalization {
+			operVector = vector.BuildVectorZ(useSpeed, useWeight)
+			templateVec = t.ZVector
+		} else {
+			operVector = vector.BuildVectorFromSeries(useSpeed, useWeight)
+			templateVec = t.Vector
+		}
 		vectorTotalMs += time.Since(t0).Seconds() * 1000
-		if len(operVector) != len(t.Vector) {
+		if len(templateVec) == 0 || len(operVector) != len(templateVec) {
 			continue
 		}
 		t1 := time.Now()
-		percent := vector.MatchPercent(operVector, t.Vector)
+		percent := vector.CosineSimilarityPercent(operVector, templateVec)
 		compareTotalMs += time.Since(t1).Seconds() * 1000
 
 		s.mu.Lock()
@@ -330,21 +347,16 @@ func (s *Service) OnPoint(ctx context.Context, p domain.DataPoint) {
 		templateID := t.ID
 		templateName := t.Name
 		thr := threshold
-		log.Printf("[recognition] рейс сохранён: шаблон %q, %.1f%%, интервал %s — %s", templateName, bestPercent, bestStartedAt.Format(time.RFC3339), bestEndedAt.Format(time.RFC3339))
+		log.Printf("[recognition] рейс обнаружен: шаблон %q, %.1f%%, интервал %s — %s", templateName, bestPercent, bestStartedAt.Format(time.RFC3339), bestEndedAt.Format(time.RFC3339))
 		detected := domain.DetectedTrip{
-			StartedAt:            bestStartedAt,
-			EndedAt:              bestEndedAt,
-			TemplateID:           &templateID,
-			TemplateName:         templateName,
+			StartedAt:             bestStartedAt,
+			EndedAt:               bestEndedAt,
+			TemplateID:            &templateID,
+			TemplateName:          templateName,
 			MatchThresholdPercent: &thr,
-			MatchPercent:         bestPercent,
+			MatchPercent:          bestPercent,
 		}
-		if s.saver != nil {
-			id, err := s.saver.SaveDetectedTrip(ctx, bestStartedAt, bestEndedAt, &templateID, templateName, bestPercent, threshold, nil)
-			if err == nil {
-				detected.ID = id
-			}
-		}
+		// Сохранение в БД и анализ фаз выполняются асинхронно (воркер в main), не блокируем поток точек.
 		if onDetected != nil {
 			onDetected(detected)
 		}

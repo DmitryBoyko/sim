@@ -2,6 +2,45 @@ package vector
 
 import "math"
 
+const varianceEpsilon = 1e-12 // защита от деления на ноль (постоянный сигнал)
+
+// ZNormalize returns z-scores: mean=0, std=1 over the given slice.
+// Formula (classic fixed-window Z-normalization): μ = (1/N)Σx_i, σ = sqrt((1/N)Σx_i² - μ²), z_i = (x_i - μ)/σ.
+// If variance is zero (constant signal), returns zeros. See e.g. Sukhanov et al. "Real Time Pattern Matching with Dynamic Normalization", Signal Processing 2020 — we use the standard (non-dynamic) variant here.
+// ZNormalize возвращает z-оценки: среднее=0, σ=1 по переданному срезу.
+func ZNormalize(values []float64) []float64 {
+	n := float64(len(values))
+	if n == 0 {
+		return nil
+	}
+	var sum, sumSq float64
+	for _, v := range values {
+		sum += v
+		sumSq += v * v
+	}
+	mean := sum / n
+	variance := sumSq/n - mean*mean
+	if variance < varianceEpsilon {
+		return make([]float64, len(values))
+	}
+	std := math.Sqrt(variance)
+	result := make([]float64, len(values))
+	for i, v := range values {
+		result[i] = (v - mean) / std
+	}
+	return result
+}
+
+// BuildVectorZ builds a single vector: concat(ZNormalize(speeds), ZNormalize(weights)).
+func BuildVectorZ(speeds, weights []float64) []float64 {
+	zs := ZNormalize(speeds)
+	zw := ZNormalize(weights)
+	out := make([]float64, 0, len(zs)+len(zw))
+	out = append(out, zs...)
+	out = append(out, zw...)
+	return out
+}
+
 // NormalizePercent scales values in slice to 0..100 by min/max of the slice.
 // If all same or empty, returns slice of zeros (or same value 50).
 func NormalizePercent(values []float64) []float64 {
@@ -80,4 +119,17 @@ func CosineSimilarity(a, b []float64) float64 {
 		return 0
 	}
 	return dot / (math.Sqrt(na) * math.Sqrt(nb))
+}
+
+// CosineSimilarityPercent returns similarity in 0..100 from cosine in [-1,1]: (cos+1)/2*100.
+func CosineSimilarityPercent(a, b []float64) float64 {
+	cos := CosineSimilarity(a, b)
+	pct := (cos + 1) / 2 * 100
+	if pct < 0 {
+		return 0
+	}
+	if pct > 100 {
+		return 100
+	}
+	return pct
 }

@@ -1,6 +1,11 @@
 * {
   box-sizing: border-box;
 }
+
+html {
+  font-size: 16px;
+}
+
 body {
   margin: 0;
   font-family: 'Segoe UI', system-ui, sans-serif;
@@ -8,6 +13,7 @@ body {
   color: #e6edf3;
   min-height: 100vh;
 }
+
 #root {
   min-height: 100vh;
 }
@@ -18,8 +24,14 @@ body {
   --border: #30363d;
   --accent: #58a6ff;
   --success: #3fb950;
+  --warning: #f59e0b;
   --danger: #f85149;
   --muted: #8b949e;
+
+  /* Subtle status backgrounds for "traffic light" UI */
+  --success-bg: rgba(63, 185, 80, 0.12);
+  --warning-bg: rgba(245, 158, 11, 0.2);
+  --danger-bg: rgba(248, 81, 73, 0.2);
 }
 
 button {
@@ -30,6 +42,7 @@ button {
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--e6edf3, #e6edf3);
+  min-height: 44px; /* touch target */
 }
 button:hover {
   background: #21262d;
@@ -51,6 +64,7 @@ input, select, textarea {
   border: 1px solid var(--border);
   background: var(--panel);
   color: inherit;
+  min-height: 36px;
 }
 
 /* Статус «Генерация идёт»: плавное пульсирование фона */
@@ -322,49 +336,90 @@ input, select, textarea {
 .log-level-warn { color: #d4a72c; }
 .log-level-error { color: var(--danger); }
 
-/* История → «История рейсов»: таблица без горизонтального скролла, столбцы в % контейнера, «Шаблон» не наезжает */
+/* История → «История рейсов»: фиксированные ширины столбцов в rem, как на Симуляции (без наезжания заголовков) */
 .history-trips-table-wrap {
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: auto;
   max-height: 320px;
+  min-height: 0;
 }
 .data-table-trips-history {
-  min-width: 0;
   width: 100%;
   table-layout: fixed;
+  min-width: 68rem;
+}
+.data-table-trips-history th,
+.data-table-trips-history td {
+  padding: 0.35rem 0.5rem;
+  vertical-align: middle;
 }
 .data-table-trips-history th:nth-child(1),
-.data-table-trips-history td:nth-child(1) { width: 14%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.data-table-trips-history td:nth-child(1) { width: 9.5rem; min-width: 9.5rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .data-table-trips-history th:nth-child(2),
-.data-table-trips-history td:nth-child(2) { width: 14%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.data-table-trips-history td:nth-child(2) { width: 9.5rem; min-width: 9.5rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .data-table-trips-history th:nth-child(3),
-.data-table-trips-history td:nth-child(3) { width: 11%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.data-table-trips-history td:nth-child(3) { width: 7.5rem; min-width: 7.5rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .data-table-trips-history th:nth-child(4),
-.data-table-trips-history td:nth-child(4) { width: 8%; min-width: 0; white-space: nowrap; }
+.data-table-trips-history td:nth-child(4) { width: 7rem; min-width: 7rem; white-space: nowrap; }
 .data-table-trips-history th:nth-child(5),
-.data-table-trips-history td:nth-child(5) { width: 10%; min-width: 0; white-space: nowrap; }
+.data-table-trips-history td:nth-child(5) { width: 8rem; min-width: 8rem; white-space: nowrap; }
 .data-table-trips-history th:nth-child(6),
-.data-table-trips-history td:nth-child(6) {
-  width: 27%;
-  min-width: 0;
+.data-table-trips-history td:nth-child(6) { width: 6rem; min-width: 6rem; white-space: nowrap; }
+.data-table-trips-history th:nth-child(7),
+.data-table-trips-history td:nth-child(7) { width: 8rem; min-width: 8rem; white-space: nowrap; }
+.data-table-trips-history th:nth-child(8),
+.data-table-trips-history td:nth-child(8) {
+  min-width: 12rem;
+  width: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.data-table-trips-history td:nth-child(6) .cell-clip {
+.data-table-trips-history td:nth-child(8) .cell-clip {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
 }
-.data-table-trips-history th:nth-child(7),
-.data-table-trips-history td:nth-child(7) { width: 16%; min-width: 0; white-space: nowrap; }
+.data-table-trips-history th:nth-child(9),
+.data-table-trips-history td:nth-child(9) { width: 8.5rem; min-width: 8.5rem; white-space: nowrap; }
+.data-table-trips-history tbody tr.selected td {
+  background: rgba(59, 130, 246, 0.15);
+}
 
 /* Симуляция → «Найденные рейсы»: столбец «Шаблон» максимально широкий, остальные фиксированные */
 .data-table-trips-found {
   min-width: 55rem; /* чтобы «Шаблон» не схлопывался: при узком экране будет горизонтальный скролл */
 }
+.data-table-trips-found tbody tr.selected td {
+  background: rgba(59, 130, 246, 0.15);
+}
+
+/* Симуляция → таблица фаз справа: цветная полоса по высоте строки */
+.operational-phases-table {
+  width: 100%;
+  table-layout: fixed;
+}
+.operational-phases-table .phase-cell-with-bar {
+  overflow: visible;
+  vertical-align: middle;
+}
+.operational-phases-table .phase-row-bar {
+  display: block;
+}
+.operational-phases-table th:nth-child(1),
+.operational-phases-table td:nth-child(1) { width: 10rem; }
+.operational-phases-table th:nth-child(2),
+.operational-phases-table td:nth-child(2),
+.operational-phases-table th:nth-child(3),
+.operational-phases-table td:nth-child(3) { width: 9rem; white-space: nowrap; }
+.operational-phases-table th:nth-child(4),
+.operational-phases-table td:nth-child(4) { width: 6rem; white-space: nowrap; }
+.operational-phases-table th:nth-child(5),
+.operational-phases-table td:nth-child(5),
+.operational-phases-table th:nth-child(6),
+.operational-phases-table td:nth-child(6) { width: 6.5rem; white-space: nowrap; }
 .data-table-trips-found th:nth-child(1),
 .data-table-trips-found td:nth-child(1) { width: 9.5rem; min-width: 9.5rem; white-space: nowrap; }  /* Начало */
 .data-table-trips-found th:nth-child(2),
@@ -379,9 +434,11 @@ input, select, textarea {
 .data-table-trips-found td.col-template,
 .data-table-trips-found th:nth-child(6),
 .data-table-trips-found td:nth-child(6) {
-  width: auto;       /* забирает остаток */
-  min-width: 14rem;  /* но не схлопывается */
+  width: auto;
+  min-width: 12rem;
 }
+.data-table-trips-found th:nth-child(7),
+.data-table-trips-found td:nth-child(7) { width: 8rem; min-width: 8rem; white-space: nowrap; }  /* Ср. вес (трансп.) */
 
 .modal-overlay {
   position: fixed;
@@ -462,3 +519,114 @@ input, select, textarea {
 .doc-content a:hover { text-decoration: underline; }
 .doc-content blockquote { margin: 0 0 1rem; padding-left: 1rem; border-left: 4px solid var(--border); color: var(--muted); }
 .doc-content hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+
+/* ---------- Responsive layout ---------- */
+
+/* Tablet: stack wide cards and soften paddings */
+@media (max-width: 1023px) {
+  .page-header {
+    padding: 0 1rem;
+  }
+
+  .page-content {
+    padding: 1rem;
+  }
+
+  /* Top-level cards inside page content take full width */
+  .page-content > div > .card,
+  .page-content > .card {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+/* Mobile layout & typography */
+@media (max-width: 767px) {
+  html {
+    font-size: 14px;
+  }
+
+  /* Off-canvas sidebar for mobile */
+  .sidebar {
+    width: 220px;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  .app-layout.sidebar-open .sidebar {
+    transform: translateX(0);
+  }
+  .page {
+    margin-left: 0;
+  }
+  .app-layout.sidebar-open .page {
+    margin-left: 0;
+  }
+
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 40;
+  }
+
+  .page-header {
+    font-size: 1.1rem;
+    padding: 0 0.75rem;
+  }
+
+  .page-content {
+    padding: 0.75rem;
+  }
+
+  .card {
+    padding: 0.75rem;
+    overflow-x: auto;
+  }
+
+  /* Forms: single-column, full-width inputs */
+  .form-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .form-row label {
+    min-width: 0;
+  }
+  .form-row input,
+  .form-row select,
+  .form-row textarea {
+    width: 100%;
+  }
+
+  /* Tables: horizontal scroll instead of squeezing */
+  .card table.data-table {
+    min-width: 32rem;
+    font-size: 0.85rem;
+  }
+
+  /* Docs tables: allow horizontal scroll */
+  .doc-content table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  /* Modals: fullscreen on mobile */
+  .modal-overlay {
+    align-items: stretch;
+    justify-content: stretch;
+  }
+  .modal {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+    padding: 1rem;
+  }
+
+  /* Charts: ensure full-width container */
+  .echarts-for-react,
+  .echarts-for-react > div {
+    width: 100% !important;
+  }
+}

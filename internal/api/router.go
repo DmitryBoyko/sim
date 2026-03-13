@@ -73,6 +73,7 @@ func Router(s *Server) *gin.Engine {
 		api.PUT("/templates/:id", s.TemplatesUpdate)
 		api.DELETE("/templates/:id", s.TemplatesDelete)
 		api.GET("/trips", s.TripsList)
+		api.GET("/trips/:id/phases", s.TripsPhases)
 		api.DELETE("/trips", s.TripsDeleteAll)
 		api.GET("/history", s.History)
 		api.GET("/recognition/analysis", s.RecognitionAnalysis)

@@ -64,18 +64,8 @@ func main() {
 	tripSaver := &api.TripSaverAdapter{Repo: tripsRepo}
 	rec := recognition.NewService(templateProvider, tripSaver, settings.Recognition.MatchThresholdPercent)
 	_ = rec.RefreshTemplates(ctx)
-	rec.UpdateConfig(settings.Recognition.MatchThresholdPercent, settings.Recognition.Enabled, settings.Recognition.CooldownAfterTripSec, settings.Recognition.SpeedBaselineKmh, settings.Recognition.WeightBaselineTon)
-	rec.SetOnDetected(func(t domain.DetectedTrip) {
-		hub.BroadcastTripFound(t)
-	})
-
-	q.SetOnPoint(func(p domain.DataPoint) {
-		ctx := context.Background()
-		_ = operRepo.Insert(ctx, &p)
-		hub.BroadcastPoint(p)
-		rec.OnPoint(ctx, p)
-	})
-
+	rec.UpdateConfig(settings.Recognition.MatchThresholdPercent, settings.Recognition.Enabled, settings.Recognition.CooldownAfterTripSec, settings.Recognition.SpeedBaselineKmh, settings.Recognition.WeightBaselineTon, settings.Recognition.UseZNormalization)
+	// Анализ фаз и веса выполняется асинхронно; broadcast — после записи payload_ton и фаз в БД
 	server := &api.Server{
 		ParamsRepo:    paramsRepo,
 		OperRepo:      operRepo,
@@ -89,6 +79,39 @@ func main() {
 		Recognition:   rec,
 		Hub:           hub,
 	}
+	// Очередь сохранения рейсов: распознавание не блокируется на записи в БД, воркер сохраняет и запускает анализ фаз.
+	const tripSaveQueueSize = 256
+	saveTripCh := make(chan domain.DetectedTrip, tripSaveQueueSize)
+	go func() {
+		bg := context.Background()
+		for t := range saveTripCh {
+			if t.MatchThresholdPercent == nil {
+				continue
+			}
+			id, err := tripSaver.SaveDetectedTrip(bg, t.StartedAt, t.EndedAt, t.TemplateID, t.TemplateName, t.MatchPercent, *t.MatchThresholdPercent, nil)
+			if err != nil {
+				log.Printf("[main] сохранение рейса в БД: %v", err)
+				continue
+			}
+			t.ID = id
+			server.RunAnalysisAndBroadcast(bg, t)
+		}
+	}()
+	rec.SetOnDetected(func(t domain.DetectedTrip) {
+		select {
+		case saveTripCh <- t:
+		default:
+			log.Printf("[main] очередь сохранения рейсов переполнена, рейс отброшен (шаблон %q)", t.TemplateName)
+		}
+	})
+
+	q.SetOnPoint(func(p domain.DataPoint) {
+		ctx := context.Background()
+		_ = operRepo.Insert(ctx, &p)
+		hub.BroadcastPoint(p)
+		rec.OnPoint(ctx, p)
+	})
+
 	// Рассылка состояния анализа только пока генератор запущен (после Стоп блок «Анализ» перестаёт обновляться).
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)

@@ -11,6 +11,7 @@ export type TripFoundPayload = {
   template_name?: string
   match_threshold_percent?: number
   match_percent: number
+  transport_avg_weight_ton?: number | null
   phases?: { phase: string; from: string; to: string }[]
 }
 

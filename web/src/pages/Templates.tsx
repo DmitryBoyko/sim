@@ -172,7 +172,7 @@ export default function Templates() {
       setSelectedId(null)
       setSelectedTemplate(null)
       zoomRef.current = null
-      load(pageSize, (page - 1) * pageSize)
+      loadPaginated(pageSize, (page - 1) * pageSize)
     } catch (e) {
       setError(String(e))
     }
@@ -205,7 +205,7 @@ export default function Templates() {
     try {
       await api.deleteTemplate(id)
       if (selectedId === id) handleCloseSelection()
-      load(pageSize, (page - 1) * pageSize)
+      loadPaginated(pageSize, (page - 1) * pageSize)
     } catch (e) {
       setError(String(e))
     }

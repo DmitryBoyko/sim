@@ -10,10 +10,12 @@ import (
 	"path/filepath"
 	"sim/internal/domain"
 	"sim/internal/repository"
+	"sim/internal/service/analysis"
 	"sim/internal/service/generator"
 	"sim/internal/service/queue"
 	"sim/internal/service/recognition"
 	"sim/internal/service/vector"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -69,7 +71,14 @@ func (s *Server) PutSettings(c *gin.Context) {
 		return
 	}
 	s.Generator.UpdateConfig(&settings)
-	s.Recognition.UpdateConfig(settings.Recognition.MatchThresholdPercent, settings.Recognition.Enabled, settings.Recognition.CooldownAfterTripSec, settings.Recognition.SpeedBaselineKmh, settings.Recognition.WeightBaselineTon)
+	s.Recognition.UpdateConfig(settings.Recognition.MatchThresholdPercent, settings.Recognition.Enabled, settings.Recognition.CooldownAfterTripSec, settings.Recognition.SpeedBaselineKmh, settings.Recognition.WeightBaselineTon, settings.Recognition.UseZNormalization)
+	if settings.Recognition.UseZNormalization {
+		if n, err := s.TemplatesRepo.EnsureZVectors(ctx, vector.BuildVectorZ); err != nil {
+			log.Printf("[api] PutSettings EnsureZVectors: %v", err)
+		} else if n > 0 {
+			log.Printf("[api] PutSettings: заполнено zvector для %d шаблонов", n)
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -179,11 +188,45 @@ func (s *Server) DataOperationalStats(c *gin.Context) {
 		return
 	}
 
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	heapAllocMB := float64(memStats.HeapAlloc) / (1024 * 1024)
+	sysMB := float64(memStats.Sys) / (1024 * 1024)
+	numGoroutine := runtime.NumGoroutine()
+
+	// Светофор по ресурсам: green — норма, yellow — насторожиться, red — на пределе.
+	const heapGreenMB, heapYellowMB = 150, 400   // HeapAlloc
+	const goroutineGreen, goroutineYellow = 100, 300
+	memoryStatus := "green"
+	if heapAllocMB > heapYellowMB {
+		memoryStatus = "red"
+	} else if heapAllocMB > heapGreenMB {
+		memoryStatus = "yellow"
+	}
+	goroutinesStatus := "green"
+	if numGoroutine > goroutineYellow {
+		goroutinesStatus = "red"
+	} else if numGoroutine > goroutineGreen {
+		goroutinesStatus = "yellow"
+	}
+	resourceStatus := "green"
+	if memoryStatus == "red" || goroutinesStatus == "red" {
+		resourceStatus = "red"
+	} else if memoryStatus == "yellow" || goroutinesStatus == "yellow" {
+		resourceStatus = "yellow"
+	}
+
 	out := gin.H{
-		"running":           running,
-		"points_since_start": pointsSinceStart,
-		"trips_since_start":  tripsSinceStart,
-		"active_jobs_count":  activeJobs,
+		"running":             running,
+		"points_since_start":  pointsSinceStart,
+		"trips_since_start":   tripsSinceStart,
+		"active_jobs_count":   activeJobs,
+		"memory_alloc_mb":     round2(heapAllocMB),
+		"memory_sys_mb":      round2(sysMB),
+		"num_goroutine":      numGoroutine,
+		"memory_status":      memoryStatus,
+		"goroutines_status":   goroutinesStatus,
+		"resource_status":    resourceStatus,
 	}
 	if lastStartedAt != nil {
 		out["last_started_at"] = lastStartedAt.Format(time.RFC3339)
@@ -193,6 +236,8 @@ func (s *Server) DataOperationalStats(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, out)
 }
+
+func round2(f float64) float64 { return float64(int(f*100+0.5)) / 100 }
 
 // DataOperational returns last N minutes: from in-memory queue if available, else from DB.
 func (s *Server) DataOperational(c *gin.Context) {
@@ -282,7 +327,10 @@ func (s *Server) TemplatesUpdate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := s.TemplatesRepo.Update(ctx, id, body.Name, body.FromIndex, body.ToIndex, vector.BuildVectorFromSeries); err != nil {
+	buildBoth := func(speed, weight []float64) ([]float64, []float64) {
+		return vector.BuildVectorFromSeries(speed, weight), vector.BuildVectorZ(speed, weight)
+	}
+	if err := s.TemplatesRepo.Update(ctx, id, body.Name, body.FromIndex, body.ToIndex, buildBoth); err != nil {
 		log.Printf("[api] TemplatesUpdate: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -315,7 +363,8 @@ func (s *Server) TemplatesCreate(c *gin.Context) {
 		times[i] = p.T
 	}
 	vec := vector.BuildVectorFromSeries(speeds, weights)
-	id, err := s.TemplatesRepo.Create(ctx, body.Name, speeds, weights, times, vec)
+	zvec := vector.BuildVectorZ(speeds, weights)
+	id, err := s.TemplatesRepo.Create(ctx, body.Name, speeds, weights, times, vec, zvec)
 	if err != nil {
 		log.Printf("[api] TemplatesCreate: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -344,7 +393,56 @@ func (s *Server) TemplatesDelete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// TripsList returns detected trips.
+// runAnalysisForTrip выполняет анализ фаз и веса по точкам рейса и обновляет БД. Синхронно.
+func (s *Server) runAnalysisForTrip(ctx context.Context, tripID string, startedAt, endedAt time.Time, settings *domain.AppSettings) error {
+	if settings == nil {
+		var err error
+		settings, err = s.ParamsRepo.GetSettings(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	points, err := s.OperRepo.History(ctx, startedAt, endedAt)
+	if err != nil {
+		return err
+	}
+	analysisPoints := analysis.DataPointsToAnalysisPoints(points)
+	cfg := analysis.FromSettings(settings.Analysis,
+		settings.Recognition.SpeedBaselineKmh,
+		settings.Recognition.WeightBaselineTon,
+		settings.SpeedWeight.MEmptyTon)
+	result := analysis.AnalyzeTrip(analysisPoints, cfg)
+	domainPhases := analysis.ToDomainPhases(result.Phases)
+	return s.TripsRepo.UpdatePayloadAndPhases(ctx, tripID, result.PayloadTon, domainPhases)
+}
+
+// RunAnalysisAndBroadcast выполняет анализ фаз и веса рейса в горутине, обновляет БД и рассылает trip_found.
+// Не блокирует основную логику; ошибки логируются.
+func (s *Server) RunAnalysisAndBroadcast(ctx context.Context, t domain.DetectedTrip) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[api] RunAnalysisAndBroadcast panic: %v", r)
+			}
+		}()
+		bg := context.Background()
+		if err := s.runAnalysisForTrip(bg, t.ID, t.StartedAt, t.EndedAt, nil); err != nil {
+			log.Printf("[api] RunAnalysisAndBroadcast: %v", err)
+			s.Hub.BroadcastTripFound(t)
+			return
+		}
+		payloadTon := 0.0
+		phases, _ := s.TripsRepo.GetPhasesByTripID(bg, t.ID)
+		if trip, _ := s.TripsRepo.GetByID(bg, t.ID); trip != nil && trip.PayloadTon != nil {
+			payloadTon = *trip.PayloadTon
+		}
+		t.PayloadTon = &payloadTon
+		t.AnalysisPhases = phases
+		s.Hub.BroadcastTripFound(t)
+	}()
+}
+
+// TripsList returns detected trips (with payload_ton).
 func (s *Server) TripsList(c *gin.Context) {
 	ctx := c.Request.Context()
 	var from, to *time.Time
@@ -371,6 +469,41 @@ func (s *Server) TripsList(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"trips": list})
+}
+
+// TripsPhases returns phases and payload for a trip. GET /api/trips/:id/phases
+func (s *Server) TripsPhases(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id required"})
+		return
+	}
+	trip, err := s.TripsRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		log.Printf("[api] TripsPhases GetByID: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	phases, err := s.TripsRepo.GetPhasesByTripID(ctx, id)
+	if err != nil {
+		log.Printf("[api] TripsPhases GetPhasesByTripID: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	payloadTon := 0.0
+	if trip.PayloadTon != nil {
+		payloadTon = *trip.PayloadTon
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"trip_id":     id,
+		"payload_ton": payloadTon,
+		"phases":      phases,
+	})
 }
 
 // TripsDeleteAll deletes all detected trips.
@@ -509,7 +642,8 @@ func (s *Server) runRecalculateTripsJob(ctx context.Context, jobID string, from,
 	reportInterval := 200 * time.Millisecond
 	speedBaseline := settings.Recognition.SpeedBaselineKmh
 	weightBaseline := settings.Recognition.WeightBaselineTon
-	if err := recognition.RunBatchWithTemplates(ctx, points, provider, threshold, cooldownSec, speedBaseline, weightBaseline, saver, func(processed, totalItems int) {
+	useZNorm := settings.Recognition.UseZNormalization
+	if err := recognition.RunBatchWithTemplates(ctx, points, provider, threshold, cooldownSec, speedBaseline, weightBaseline, useZNorm, saver, func(processed, totalItems int) {
 		if totalItems == 0 {
 			return
 		}
@@ -527,6 +661,16 @@ func (s *Server) runRecalculateTripsJob(ctx context.Context, jobID string, from,
 		log.Printf("[api] runRecalculateTripsJob cancelled job_id=%s", jobID)
 		_ = s.JobsRepo.Cancel(ctx, jobID, "Отменён пользователем")
 		return
+	}
+	// Анализ фаз и веса для каждого найденного рейса в диапазоне
+	tripsInRange, err := s.TripsRepo.List(ctx, &from, &to, 0)
+	if err == nil {
+		for _, tr := range tripsInRange {
+			if ctx.Err() != nil {
+				break
+			}
+			_ = s.runAnalysisForTrip(ctx, tr.ID, tr.StartedAt, tr.EndedAt, settings)
+		}
 	}
 	_ = s.JobsRepo.Complete(ctx, jobID)
 }
@@ -775,9 +919,10 @@ var allowedDocPaths = map[string]bool{
 	"README.md":            true,
 	"docs/API.md":          true,
 	"docs/ARCHITECTURE.md": true,
+	"docs/MATH.md":         true,
 }
 
-// DocsGet returns raw markdown for a whitelisted file. Query: file=README.md | docs/API.md | docs/ARCHITECTURE.md.
+// DocsGet returns raw markdown for a whitelisted file. Query: file=README.md | docs/API.md | docs/ARCHITECTURE.md | docs/MATH.md.
 func (s *Server) DocsGet(c *gin.Context) {
 	file := c.Query("file")
 	if file == "" {

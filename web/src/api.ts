@@ -56,6 +56,16 @@ export type AppSettings = {
     cooldown_after_trip_sec: number
     speed_baseline_kmh?: number
     weight_baseline_ton?: number
+    use_z_normalization?: boolean
+  }
+  analysis?: {
+    plateau_half_window: number
+    plateau_noise_tolerance_ton: number
+    payload_threshold_ton: number
+    min_phase_points: number
+    plateau_edge_dilation_enabled?: boolean
+    plateau_gap_closing_enabled?: boolean
+    plateau_max_gap_points?: number
   }
 }
 export type TripTemplate = {
@@ -79,8 +89,28 @@ export type DetectedTrip = {
   template_name?: string
   match_threshold_percent?: number
   match_percent: number
+  payload_ton?: number | null
+  /** Средний вес фазы «Транспортировка» (из API списка рейсов). */
+  transport_avg_weight_ton?: number | null
   phases?: { phase: string; from: string; to: string }[]
   created_at: string
+}
+
+export type TripPhase = {
+  phase_type: 'loading' | 'transport' | 'unloading' | 'return'
+  started_at: string
+  ended_at: string
+  duration_sec: number
+  avg_speed_kmh: number
+  avg_weight_ton: number
+  point_count: number
+  sort_order: number
+}
+
+export type TripPhasesResponse = {
+  trip_id: string
+  payload_ton: number
+  phases: TripPhase[]
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -109,6 +139,8 @@ export async function getOperationalData(minutes = 30): Promise<{ points: DataPo
   return r.json()
 }
 
+export type ResourceStatus = 'green' | 'yellow' | 'red'
+
 export type OperationalStats = {
   running: boolean
   last_started_at?: string
@@ -116,6 +148,12 @@ export type OperationalStats = {
   trips_since_start: number
   active_jobs_count: number
   last_trip_at?: string
+  memory_alloc_mb?: number
+  memory_sys_mb?: number
+  num_goroutine?: number
+  memory_status?: ResourceStatus
+  goroutines_status?: ResourceStatus
+  resource_status?: ResourceStatus
 }
 
 export async function getOperationalStats(): Promise<OperationalStats> {
@@ -176,6 +214,11 @@ export async function deleteAllTrips(): Promise<void> {
   await apiFetch('/api/trips', { method: 'DELETE' })
 }
 
+export async function getTripPhases(tripId: string): Promise<TripPhasesResponse> {
+  const r = await apiFetch('/api/trips/' + encodeURIComponent(tripId) + '/phases')
+  return r.json()
+}
+
 export async function getHistory(from: string, to: string): Promise<{ points: DataPoint[]; trips: DetectedTrip[] }> {
   const r = await apiFetch(`/api/history?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
   return r.json()
@@ -202,6 +245,7 @@ export type RecognitionAnalysisState = {
   comparisons?: TemplateComparisonResult[]
   window_interval_start?: string
   window_interval_end?: string
+  normalization_mode?: 'min-max' | 'z-norm'
 }
 
 export async function getRecognitionAnalysis(): Promise<RecognitionAnalysisState> {
@@ -351,7 +395,7 @@ export async function deleteLogs(params: DeleteLogsParams): Promise<{ deleted: n
   return data as { deleted: number }
 }
 
-/** Get markdown content for a doc. file: README.md | docs/API.md | docs/ARCHITECTURE.md */
+/** Get markdown content for a doc. file: README.md | docs/API.md | docs/ARCHITECTURE.md | docs/MATH.md */
 export async function getDoc(file: string): Promise<{ content: string }> {
   const r = await apiFetch('/api/docs?file=' + encodeURIComponent(file))
   const data = await r.json()

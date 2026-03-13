@@ -63,5 +63,5 @@ INSERT INTO app_params (key, value) VALUES
 ('speed_weight', '{"v_min_kmh":0.5,"v_max_kmh":40,"m_max_ton":100,"m_min_ton":90,"m_empty_ton":1}'::jsonb),
 ('noise', '{"speed_noise_kmh":0.5,"weight_noise_ton":1,"weight_noise_load_ton":2}'::jsonb),
 ('intervals', '{"generation_interval_sec":10,"chart_minutes":30}'::jsonb),
-('recognition', '{"window_speed_size":100,"window_weight_size":95,"match_threshold_percent":85,"enabled":false}'::jsonb)
+('recognition', '{"window_speed_size":100,"window_weight_size":95,"match_threshold_percent":85,"enabled":false,"use_z_normalization":false}'::jsonb)
 ON CONFLICT (key) DO NOTHING;

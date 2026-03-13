@@ -20,8 +20,8 @@ func NewTemplatesRepository(pool *pgxpool.Pool) *TemplatesRepository {
 	return &TemplatesRepository{pool: pool}
 }
 
-// Create saves a template with its vector.
-func (r *TemplatesRepository) Create(ctx context.Context, name string, rawSpeed, rawWeight []float64, rawTS []time.Time, vector []float64) (string, error) {
+// Create saves a template with its vector and zvector.
+func (r *TemplatesRepository) Create(ctx context.Context, name string, rawSpeed, rawWeight []float64, rawTS []time.Time, vector, zvector []float64) (string, error) {
 	id := uuid.New().String()
 	speedJSON, _ := json.Marshal(rawSpeed)
 	weightJSON, _ := json.Marshal(rawWeight)
@@ -41,17 +41,21 @@ func (r *TemplatesRepository) Create(ctx context.Context, name string, rawSpeed,
 		return "", err
 	}
 	vecJSON, _ := json.Marshal(vector)
-	_, err = r.pool.Exec(ctx, `INSERT INTO trip_template_vectors (template_id, vector) VALUES ($1, $2)`, id, vecJSON)
+	var zvecJSON []byte
+	if len(zvector) > 0 {
+		zvecJSON, _ = json.Marshal(zvector)
+	}
+	_, err = r.pool.Exec(ctx, `INSERT INTO trip_template_vectors (template_id, vector, zvector) VALUES ($1, $2, $3)`, id, vecJSON, zvecJSON)
 	if err != nil {
 		return "", err
 	}
 	return id, nil
 }
 
-// List returns all templates with vectors for recognition.
+// ListWithVectors returns all templates with vector and zvector for recognition.
 func (r *TemplatesRepository) ListWithVectors(ctx context.Context) ([]domain.TripTemplateWithVector, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT t.id, t.name, t.created_at, t.speed_count, t.weight_count, t.raw_speed, t.raw_weight, v.vector
+		SELECT t.id, t.name, t.created_at, t.speed_count, t.weight_count, t.raw_speed, t.raw_weight, v.vector, v.zvector
 		FROM trip_templates t
 		JOIN trip_template_vectors v ON v.template_id = t.id
 	`)
@@ -63,12 +67,16 @@ func (r *TemplatesRepository) ListWithVectors(ctx context.Context) ([]domain.Tri
 	for rows.Next() {
 		var t domain.TripTemplateWithVector
 		var rawSpeed, rawWeight, rawVec []byte
-		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt, &t.SpeedCount, &t.WeightCount, &rawSpeed, &rawWeight, &rawVec); err != nil {
+		var rawZvec []byte
+		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt, &t.SpeedCount, &t.WeightCount, &rawSpeed, &rawWeight, &rawVec, &rawZvec); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(rawSpeed, &t.RawSpeed)
 		_ = json.Unmarshal(rawWeight, &t.RawWeight)
 		_ = json.Unmarshal(rawVec, &t.Vector)
+		if len(rawZvec) > 0 {
+			_ = json.Unmarshal(rawZvec, &t.ZVector)
+		}
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -159,8 +167,11 @@ func (r *TemplatesRepository) GetByID(ctx context.Context, id string) (*domain.T
 	return &t, hasVector, nil
 }
 
+// BuildVectorsFunc returns both min-max vector and z-vector for a template slice.
+type BuildVectorsFunc func(speed, weight []float64) (vector, zvector []float64)
+
 // Update updates name and/or narrows range (from_index, to_index). Range can only be reduced.
-func (r *TemplatesRepository) Update(ctx context.Context, id string, name string, fromIndex, toIndex *int, buildVector func(speed, weight []float64) []float64) error {
+func (r *TemplatesRepository) Update(ctx context.Context, id string, name string, fromIndex, toIndex *int, buildVectors BuildVectorsFunc) error {
 	if name != "" {
 		_, err := r.pool.Exec(ctx, `UPDATE trip_templates SET name = $1 WHERE id = $2`, name, id)
 		if err != nil {
@@ -202,10 +213,14 @@ func (r *TemplatesRepository) Update(ctx context.Context, id string, name string
 		}
 		ts = ts[from : to+1]
 	}
-	vec := buildVector(speed, weight)
+	vec, zvec := buildVectors(speed, weight)
 	speedJSON, _ := json.Marshal(speed)
 	weightJSON, _ := json.Marshal(weight)
 	vecJSON, _ := json.Marshal(vec)
+	var zvecJSON []byte
+	if len(zvec) > 0 {
+		zvecJSON, _ = json.Marshal(zvec)
+	}
 	tsJSON, _ := json.Marshal(ts)
 	var intervalStart, intervalEnd *time.Time
 	if len(ts) > 0 {
@@ -221,7 +236,7 @@ func (r *TemplatesRepository) Update(ctx context.Context, id string, name string
 	if err != nil {
 		return err
 	}
-	_, err = r.pool.Exec(ctx, `UPDATE trip_template_vectors SET vector = $1 WHERE template_id = $2`, vecJSON, id)
+	_, err = r.pool.Exec(ctx, `UPDATE trip_template_vectors SET vector = $1, zvector = $2 WHERE template_id = $3`, vecJSON, zvecJSON, id)
 	return err
 }
 
@@ -229,4 +244,41 @@ func (r *TemplatesRepository) Update(ctx context.Context, id string, name string
 func (r *TemplatesRepository) Delete(ctx context.Context, id string) error {
 	_, err := r.pool.Exec(ctx, `DELETE FROM trip_templates WHERE id = $1`, id)
 	return err
+}
+
+// EnsureZVectors computes and saves zvector for all templates where zvector IS NULL (from raw_speed, raw_weight).
+// buildZVector(speed, weight) should return the Z-normalized concatenated vector.
+func (r *TemplatesRepository) EnsureZVectors(ctx context.Context, buildZVector func(speed, weight []float64) []float64) (int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT t.id, t.raw_speed, t.raw_weight
+		FROM trip_templates t
+		JOIN trip_template_vectors v ON v.template_id = t.id
+		WHERE v.zvector IS NULL
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var updated int
+	for rows.Next() {
+		var id string
+		var rawSpeed, rawWeight []byte
+		if err := rows.Scan(&id, &rawSpeed, &rawWeight); err != nil {
+			return updated, err
+		}
+		var speed, weight []float64
+		_ = json.Unmarshal(rawSpeed, &speed)
+		_ = json.Unmarshal(rawWeight, &weight)
+		zvec := buildZVector(speed, weight)
+		if len(zvec) == 0 {
+			continue
+		}
+		zvecJSON, _ := json.Marshal(zvec)
+		_, err := r.pool.Exec(ctx, `UPDATE trip_template_vectors SET zvector = $1 WHERE template_id = $2`, zvecJSON, id)
+		if err != nil {
+			return updated, err
+		}
+		updated++
+	}
+	return updated, rows.Err()
 }

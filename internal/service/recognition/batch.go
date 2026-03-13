@@ -11,6 +11,7 @@ import (
 // RunBatch runs trip detection over a slice of points (e.g. historical data) using the same
 // sliding-window + template matching logic as OnPoint. Templates must be sorted by window size
 // (use sortTemplatesBySize). speedBaselineKmh/weightBaselineTon: 0 = не проверять «у оси».
+// useZNormalization: true = Z-нормализация (сравнение с template.ZVector), false = Min-Max (template.Vector).
 // Calls saver for each detected trip and onProgress(processed, total) periodically for progress reporting.
 func RunBatch(
 	ctx context.Context,
@@ -19,6 +20,7 @@ func RunBatch(
 	threshold float64,
 	cooldownSec int,
 	speedBaselineKmh, weightBaselineTon float64,
+	useZNormalization bool,
 	saver TripSaver,
 	onProgress func(processed, total int),
 ) {
@@ -81,11 +83,19 @@ func RunBatch(
 				startIdx = 0
 			}
 			startedAt := timeWindow[startIdx]
-			operVector := vector.BuildVectorFromSeries(useSpeed, useWeight)
-			if len(operVector) != len(t.Vector) {
+			var operVector []float64
+			var templateVec []float64
+			if useZNormalization {
+				operVector = vector.BuildVectorZ(useSpeed, useWeight)
+				templateVec = t.ZVector
+			} else {
+				operVector = vector.BuildVectorFromSeries(useSpeed, useWeight)
+				templateVec = t.Vector
+			}
+			if len(templateVec) == 0 || len(operVector) != len(templateVec) {
 				continue
 			}
-			percent := vector.MatchPercent(operVector, t.Vector)
+			percent := vector.CosineSimilarityPercent(operVector, templateVec)
 			if percent < threshold {
 				continue
 			}
@@ -136,6 +146,7 @@ func RunBatchWithTemplates(
 	threshold float64,
 	cooldownSec int,
 	speedBaselineKmh, weightBaselineTon float64,
+	useZNormalization bool,
 	saver TripSaver,
 	onProgress func(processed, total int),
 ) error {
@@ -145,6 +156,6 @@ func RunBatchWithTemplates(
 		return err
 	}
 	sortTemplatesBySize(list)
-	RunBatch(ctx, points, list, threshold, cooldownSec, speedBaselineKmh, weightBaselineTon, saver, onProgress)
+	RunBatch(ctx, points, list, threshold, cooldownSec, speedBaselineKmh, weightBaselineTon, useZNormalization, saver, onProgress)
 	return nil
 }

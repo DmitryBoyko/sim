@@ -3,9 +3,9 @@ import ReactECharts from 'echarts-for-react'
 import * as api from '../api'
 import { useSessionPageState } from '../sessionState'
 import { useNotifications } from '../contexts/Notifications'
-import { formatDateTime, formatTripInterval, round1, toDateTimeLocalValue } from '../utils/format'
+import { formatDateTime, formatDateTimeShortYear, formatTripInterval, formatDurationSeconds, round1, toDateTimeLocalValue } from '../utils/format'
 import { logInfo } from '../lib/frontendLog'
-import type { BackgroundJob, DataPoint, DetectedTrip, TripTemplate } from '../api'
+import type { BackgroundJob, DataPoint, DetectedTrip, TripPhase, TripPhasesResponse, TripTemplate } from '../api'
 
 const PAGE_SIZE_OPTIONS = [5, 10] as const
 const CHART_MINUTES_OPTIONS = [30, 60, 90, 120] as const
@@ -13,6 +13,18 @@ const CHART_MINUTES_OPTIONS = [30, 60, 90, 120] as const
 function getWindowRange(minutes: number): { from: string; to: string } {
   const end = new Date()
   const start = new Date(end.getTime() - minutes * 60 * 1000)
+  return {
+    from: start.toISOString().slice(0, 16),
+    to: end.toISOString().slice(0, 16),
+  }
+}
+
+function getTodayRange(): { from: string; to: string } {
+  const now = new Date()
+  const start = new Date(now)
+  start.setHours(0, 0, 0, 0)
+  const end = new Date(now)
+  end.setHours(23, 59, 59, 999)
   return {
     from: start.toISOString().slice(0, 16),
     to: end.toISOString().slice(0, 16),
@@ -29,15 +41,30 @@ const HISTORY_SESSION_DEFAULTS = {
   rangeBegin: '',
   rangeEnd: '',
   templateName: '',
+  historyTripsPanelWidthPxV3: 1200,
+}
+const HISTORY_TRIPS_PANEL_MIN_PX = 220
+const HISTORY_TRIPS_PANEL_MAX_PX = 1250
+const HISTORY_RESIZER_WIDTH_PX = 6
+const HISTORY_PHASES_PANEL_MIN_PX = 256
+
+function getPhaseType(ph: { phase_type?: string; phase?: string }): string {
+  const t = ph.phase_type ?? ph.phase ?? ''
+  if (t === 'load') return 'loading'
+  if (t === 'unload') return 'unloading'
+  return t
 }
 
 export default function History() {
   const defaultSession = useMemo(
-    () => ({ ...HISTORY_SESSION_DEFAULTS, from: getWindowRange(30).from, to: getWindowRange(30).to }),
+    () => {
+      const today = getTodayRange()
+      return { ...HISTORY_SESSION_DEFAULTS, from: today.from, to: today.to }
+    },
     []
   )
   const [session, setSession] = useSessionPageState('history', defaultSession)
-  const { chartMinutes, showChartPoints, tripsPageSize, tripsPage, rangeBegin, rangeEnd, templateName } = session
+  const { chartMinutes, showChartPoints, tripsPageSize, tripsPage, rangeBegin, rangeEnd, templateName, historyTripsPanelWidthPxV3 } = session
   const from = session.from || defaultSession.from
   const to = session.to || defaultSession.to
 
@@ -54,8 +81,51 @@ export default function History() {
   const [selectedFrom, setSelectedFrom] = useState<number | null>(null)
   const [selectedTo, setSelectedTo] = useState<number | null>(null)
   const [recalcJob, setRecalcJob] = useState<BackgroundJob | null>(null)
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(null)
+  const [tripPhasesData, setTripPhasesData] = useState<TripPhasesResponse | null>(null)
+  const [loadingPhases, setLoadingPhases] = useState(false)
   const zoomRef = useRef<{ start: number; end: number } | null>(null)
+  const historyTripsPhasesContainerRef = useRef<HTMLDivElement>(null)
+  const historyTripsTableWrapperRef = useRef<HTMLDivElement>(null)
+  const historyResizeStartX = useRef(0)
+  const historyResizeStartWidth = useRef(0)
+  const [historyResizing, setHistoryResizing] = useState(false)
+  const [chartTripsPhases, setChartTripsPhases] = useState<Record<string, TripPhasesResponse>>({})
   const { addToast } = useNotifications()
+
+  useEffect(() => {
+    if (chartTrips.length === 0) {
+      setChartTripsPhases({})
+      return
+    }
+    let cancelled = false
+    Promise.all(chartTrips.map((t) => api.getTripPhases(t.id)))
+      .then((results) => {
+        if (cancelled) return
+        const map: Record<string, TripPhasesResponse> = {}
+        chartTrips.forEach((t, i) => {
+          if (results[i]) map[t.id] = results[i]
+        })
+        setChartTripsPhases(map)
+      })
+      .catch(() => {
+        if (!cancelled) setChartTripsPhases({})
+      })
+    return () => { cancelled = true }
+  }, [chartTrips])
+
+  const phaseTypeLabel: Record<string, string> = {
+    loading: 'Погрузка',
+    transport: 'Транспортировка',
+    unloading: 'Разгрузка',
+    return: 'Возврат',
+  }
+  const phaseTypeColor: Record<string, string> = {
+    loading: '#F59E0B',
+    transport: '#10B981',
+    unloading: '#EF4444',
+    return: '#3B82F6',
+  }
 
   const loadTemplates = async () => {
     try {
@@ -122,15 +192,31 @@ export default function History() {
     loadTrips()
   }
 
+  // Initial load for current session window (С/По) when page is opened.
+  // Сохраняет состояние графика и рейсов при возвращении на страницу «История».
+  useEffect(() => {
+    // При первом монтировании загружаем данные для текущего диапазона.
+    // useSessionPageState восстанавливает from/to, так что после навигации
+    // будет подтянуто то же окно.
+    load().catch(() => {
+      // ошибка уже будет отражена через setError внутри loadChart/loadTrips
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleDeleteAllTrips = async () => {
     setDeleting(true)
     setError(null)
     try {
       await api.deleteAllTrips()
       setShowDeleteAllConfirm(false)
+      // Очистить график и список рейсов на клиентах сразу после успешного удаления.
+      setPoints([])
       setChartTrips([])
       setTrips([])
-      await loadTrips()
+      setSelectedTripId(null)
+      setTripPhasesData(null)
+      addToast('Все рейсы удалены.', 'success')
     } catch (e) {
       setError(String(e))
     } finally {
@@ -172,6 +258,32 @@ export default function History() {
     }, 1000)
     return () => clearInterval(interval)
   }, [recalcJob?.id, recalcJob?.status, addToast])
+
+  useEffect(() => {
+    if (!historyResizing) return
+    const container = historyTripsPhasesContainerRef.current
+    const onMove = (e: MouseEvent) => {
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const maxLeft = rect.width - HISTORY_RESIZER_WIDTH_PX - HISTORY_PHASES_PANEL_MIN_PX
+      const deltaX = e.clientX - historyResizeStartX.current
+      const next = Math.round(
+        Math.max(HISTORY_TRIPS_PANEL_MIN_PX, Math.min(maxLeft, historyResizeStartWidth.current + deltaX))
+      )
+      setSession({ historyTripsPanelWidthPxV3: next })
+    }
+    const onUp = () => setHistoryResizing(false)
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [historyResizing, setSession])
 
   const handleRecalculateTrips = useCallback(async (mode: 'recalc' | 'deleteRecalc') => {
     const fromISO = new Date(from).toISOString()
@@ -281,6 +393,19 @@ export default function History() {
     syncDateRangeToChart(rangeBegin, v)
   }
 
+  const handleSelectTrip = useCallback((t: DetectedTrip) => {
+    setSelectedTripId(t.id)
+    setTripPhasesData(null)
+    setLoadingPhases(true)
+    api.getTripPhases(t.id).then((data) => {
+      setTripPhasesData(data)
+    }).catch(() => {
+      setTripPhasesData(null)
+    }).finally(() => {
+      setLoadingPhases(false)
+    })
+  }, [])
+
   const handleShowTripOnChart = async (t: DetectedTrip) => {
     const t1 = new Date(t.started_at).getTime()
     const t2 = new Date(t.ended_at).getTime()
@@ -344,6 +469,11 @@ export default function History() {
         ? ((selectedTo + 1) / points.length) * 100
         : 100
 
+  const timeToIndex = (t: string) => {
+    const i = times.findIndex((x) => x >= t)
+    return i >= 0 ? i : times.length - 1
+  }
+
   const markAreaData = chartTrips.map((t) => {
     const i1 = times.findIndex((x) => x >= t.started_at)
     const i2 = times.findIndex((x) => x >= t.ended_at)
@@ -352,14 +482,56 @@ export default function History() {
     const name = t.template_name || 'не найден'
     const startStr = formatDateTime(t.started_at)
     const endStr = formatDateTime(t.ended_at)
-    const labelText = `${name}\n${startStr} — ${endStr}`
+    const phasesData = chartTripsPhases[t.id]
+    const payloadStr = phasesData != null ? `Ср. вес: ${phasesData.payload_ton.toFixed(1)} т` : (t.payload_ton != null ? `Ср. вес: ${t.payload_ton.toFixed(1)} т` : '')
+    const labelText = payloadStr ? `${name}\n${startStr} — ${endStr}\n${payloadStr}` : `${name}\n${startStr} — ${endStr}`
     return [
       [
-        { xAxis: start, label: { show: true, formatter: () => labelText, fontSize: 10, color: '#888' } },
+        {
+          xAxis: start,
+          label: {
+            show: true,
+            formatter: () => labelText,
+            fontSize: 10,
+            color: '#888',
+            offset: [0, -6],
+            position: 'top',
+          },
+        },
         { xAxis: end },
       ],
     ]
   }).flat()
+
+  const phaseColors: Record<string, string> = {
+    loading: 'rgba(245, 158, 11, 0.35)',
+    transport: 'rgba(16, 185, 129, 0.35)',
+    unloading: 'rgba(239, 68, 68, 0.35)',
+    return: 'rgba(59, 130, 246, 0.35)',
+  }
+
+  const phaseMarkAreaData: [unknown, unknown][] = []
+  const markLineData: { xAxis: number }[] = []
+  chartTrips.forEach((t) => {
+    const phasesData = chartTripsPhases[t.id]
+    if (!phasesData?.phases?.length) return
+    const phases = phasesData.phases
+    phases.forEach((ph, i) => {
+      const phStart = timeToIndex(ph.started_at)
+      const phEnd = timeToIndex(ph.ended_at)
+      if (phEnd > phStart) {
+        const phaseType = (ph as TripPhase).phase_type ?? getPhaseType(ph)
+        phaseMarkAreaData.push([
+          { xAxis: phStart, itemStyle: { color: phaseColors[phaseType] ?? 'rgba(128,128,128,0.3)' } },
+          { xAxis: phEnd },
+        ])
+      }
+      if (i < phases.length - 1) {
+        const boundaryIdx = timeToIndex(ph.ended_at)
+        markLineData.push({ xAxis: boundaryIdx })
+      }
+    })
+  })
 
   const option = {
     animation: false,
@@ -391,7 +563,24 @@ export default function History() {
         yAxisIndex: 0,
         symbol: showChartPoints ? 'circle' : 'none',
         symbolSize: showChartPoints ? 4 : undefined,
-        markArea: markAreaData.length ? { silent: true, data: markAreaData, itemStyle: { color: 'rgba(88, 166, 255, 0.15)' } } : undefined,
+        markArea:
+          markAreaData.length || phaseMarkAreaData.length
+            ? {
+                silent: true,
+                data: [...markAreaData, ...phaseMarkAreaData],
+                itemStyle: { color: 'rgba(88, 166, 255, 0.15)' },
+              }
+            : undefined,
+        markLine:
+          markLineData.length > 0
+            ? {
+                silent: true,
+                symbol: ['none', 'none'],
+                label: { show: false },
+                lineStyle: { type: 'dashed', color: 'rgba(255,255,255,0.55)', width: 1 },
+                data: markLineData,
+              }
+            : undefined,
       },
       {
         name: 'Вес, т',
@@ -579,10 +768,10 @@ export default function History() {
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: '1rem' }}>
+      <div className="card" style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <h3 style={{ marginTop: 0 }}>История рейсов</h3>
         <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
-          Рейсы загружаются по кнопке «Загрузить рейсы» для выбранного диапазона (С / По). Кнопка «На графике» подгружает данные графика за период рейса (не менее 30 мин) и показывает рейс прямоугольником.
+          Рейсы загружаются по кнопке «Загрузить рейсы» для выбранного диапазона (С / По). Выберите строку — справа отобразятся фазы. Кнопка «На графике» подгружает данные графика за период рейса.
         </p>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
           <span style={{ fontWeight: 600 }}>Всего: {tripsTotal}</span>
@@ -600,55 +789,180 @@ export default function History() {
             </button>
           ))}
         </div>
-        <div className="history-trips-table-wrap">
-          <table className="data-table data-table-trips data-table-trips-history">
-            <thead>
-              <tr>
-                <th>Начало</th>
-                <th>Конец</th>
-                <th>Интервал</th>
-                <th>Порог, %</th>
-                <th>Совпадение, %</th>
-                <th>Шаблон</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tripsPaginated.length === 0 && (
-                <tr>
-                  <td colSpan={7} style={{ color: 'var(--muted)' }}>
-                    Нет найденных рейсов
-                  </td>
-                </tr>
-              )}
-              {tripsPaginated.map((t) => (
-                <tr key={t.id}>
-                  <td>{formatDateTime(t.started_at)}</td>
-                  <td>{formatDateTime(t.ended_at)}</td>
-                  <td>{formatTripInterval(t.started_at, t.ended_at)}</td>
-                  <td>{t.match_threshold_percent != null ? `${t.match_threshold_percent.toFixed(0)}%` : '—'}</td>
-                  <td>{t.match_percent.toFixed(1)}%</td>
-                  <td><span className="cell-clip">{t.template_name || 'не найден'}</span></td>
-                  <td>
-                    <button type="button" onClick={() => handleShowTripOnChart(t)}>
-                      На графике
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-          <button type="button" disabled={!canPrevTrips} onClick={() => setSession((prev) => ({ ...prev, tripsPage: prev.tripsPage - 1 }))}>
-            Назад
-          </button>
-          <span style={{ color: 'var(--muted)' }}>
-            {tripsPage} / {tripsTotalPages}
-          </span>
-          <button type="button" disabled={!canNextTrips} onClick={() => setSession((prev) => ({ ...prev, tripsPage: prev.tripsPage + 1 }))}>
-            Вперед
-          </button>
+        <div
+          ref={historyTripsPhasesContainerRef}
+          style={{ display: 'flex', flex: 1, minHeight: 200, alignItems: 'stretch' }}
+        >
+          <div
+            className="history-trips-table-wrap"
+            style={{
+              width: Math.max(HISTORY_TRIPS_PANEL_MIN_PX, Math.min(HISTORY_TRIPS_PANEL_MAX_PX, Number(historyTripsPanelWidthPxV3) ?? HISTORY_SESSION_DEFAULTS.historyTripsPanelWidthPxV3)),
+              minWidth: HISTORY_TRIPS_PANEL_MIN_PX,
+              flexShrink: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0,
+            }}
+          >
+            <div
+              ref={historyTripsTableWrapperRef}
+              role="grid"
+              aria-label="История рейсов"
+              tabIndex={0}
+              style={{ flex: 1, minHeight: 0, overflow: 'auto', outline: 'none' }}
+              onKeyDown={(e) => {
+                if (tripsPaginated.length === 0) return
+                if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+                e.preventDefault()
+                const idx = selectedTripId ? tripsPaginated.findIndex((t) => t.id === selectedTripId) : -1
+                let nextIdx: number
+                if (e.key === 'ArrowDown') {
+                  nextIdx = idx < tripsPaginated.length - 1 ? idx + 1 : (idx < 0 ? 0 : idx)
+                } else {
+                  nextIdx = idx > 0 ? idx - 1 : (idx < 0 ? tripsPaginated.length - 1 : idx)
+                }
+                if (nextIdx >= 0 && nextIdx < tripsPaginated.length) handleSelectTrip(tripsPaginated[nextIdx])
+              }}
+            >
+              <table className="data-table data-table-trips data-table-trips-history">
+                <thead>
+                  <tr>
+                    <th>Начало</th>
+                    <th>Конец</th>
+                    <th>Интервал</th>
+                    <th>Порог, %</th>
+                    <th>Совпадение, %</th>
+                    <th>Груз, т</th>
+                    <th>Ср. вес (трансп.)</th>
+                    <th>Шаблон</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tripsPaginated.length === 0 && (
+                    <tr>
+                      <td colSpan={9} style={{ color: 'var(--muted)' }}>
+                        Нет найденных рейсов
+                      </td>
+                    </tr>
+                  )}
+                  {tripsPaginated.map((t) => (
+                    <tr
+                      key={t.id}
+                      onClick={() => {
+                        historyTripsTableWrapperRef.current?.focus()
+                        handleSelectTrip(t)
+                      }}
+                      className={selectedTripId === t.id ? 'selected' : ''}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td>{formatDateTimeShortYear(t.started_at)}</td>
+                      <td>{formatDateTimeShortYear(t.ended_at)}</td>
+                      <td>{formatTripInterval(t.started_at, t.ended_at)}</td>
+                      <td>{t.match_threshold_percent != null ? `${t.match_threshold_percent.toFixed(0)}%` : '—'}</td>
+                      <td>{t.match_percent.toFixed(1)}%</td>
+                      <td>{t.payload_ton != null ? t.payload_ton.toFixed(1) : '—'}</td>
+                      <td>{t.transport_avg_weight_ton != null ? `${round1(t.transport_avg_weight_ton)} т` : '—'}</td>
+                      <td><span className="cell-clip" title={t.template_name || 'не найден'}>{t.template_name || 'не найден'}</span></td>
+                      <td>
+                        <button type="button" onClick={(ev) => { ev.stopPropagation(); handleShowTripOnChart(t) }}>
+                          На графике
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap', flexShrink: 0 }}>
+              <button type="button" disabled={!canPrevTrips} onClick={() => setSession((prev) => ({ ...prev, tripsPage: prev.tripsPage - 1 }))}>
+                Назад
+              </button>
+              <span style={{ color: 'var(--muted)' }}>
+                {tripsPage} / {tripsTotalPages}
+              </span>
+              <button type="button" disabled={!canNextTrips} onClick={() => setSession((prev) => ({ ...prev, tripsPage: prev.tripsPage + 1 }))}>
+                Вперед
+              </button>
+            </div>
+          </div>
+
+          <div
+            role="separator"
+            aria-label="Изменить ширину секций"
+            tabIndex={0}
+            onMouseDown={(e) => {
+              historyResizeStartX.current = e.clientX
+              historyResizeStartWidth.current = Math.max(
+                HISTORY_TRIPS_PANEL_MIN_PX,
+                Math.min(HISTORY_TRIPS_PANEL_MAX_PX, Number(historyTripsPanelWidthPxV3) ?? HISTORY_SESSION_DEFAULTS.historyTripsPanelWidthPxV3)
+              )
+              setHistoryResizing(true)
+            }}
+            style={{
+              width: HISTORY_RESIZER_WIDTH_PX,
+              flexShrink: 0,
+              cursor: 'col-resize',
+              background: 'transparent',
+              alignSelf: 'stretch',
+            }}
+          />
+
+          <div className="card" style={{ flex: 1, minWidth: HISTORY_PHASES_PANEL_MIN_PX, display: 'flex', flexDirection: 'column', minHeight: 0, marginTop: 0 }}>
+            <h3 style={{ marginTop: 0 }}>Фазы рейса</h3>
+            {!selectedTripId ? (
+              <p style={{ color: 'var(--muted)', margin: 0 }}>Выберите рейс в таблице слева</p>
+            ) : loadingPhases ? (
+              <p style={{ color: 'var(--muted)', margin: 0 }}>Загрузка фаз…</p>
+            ) : tripPhasesData && tripPhasesData.phases.length > 0 ? (
+              <div style={{ overflowX: 'auto', flex: 1, minHeight: 0 }}>
+                <table className="data-table operational-phases-table">
+                  <thead>
+                    <tr>
+                      <th>Фаза</th>
+                      <th>Начало</th>
+                      <th>Конец</th>
+                      <th>Длительность</th>
+                      <th>Ср. скорость</th>
+                      <th>Ср. вес</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tripPhasesData.phases.map((ph: TripPhase, i: number) => {
+                      const phaseType = getPhaseType(ph)
+                      const phaseColor = phaseTypeColor[phaseType] ?? '#888'
+                      return (
+                        <tr key={i}>
+                          <td className="phase-cell-with-bar" style={{ position: 'relative', paddingLeft: 14 }}>
+                            <span
+                              className="phase-row-bar"
+                              style={{
+                                position: 'absolute',
+                                left: 0,
+                                top: 0,
+                                bottom: 0,
+                                width: 6,
+                                backgroundColor: phaseColor,
+                                borderRadius: 2,
+                              }}
+                            />
+                            {phaseTypeLabel[phaseType] ?? phaseType}
+                          </td>
+                          <td>{formatDateTimeShortYear(ph.started_at ?? '')}</td>
+                          <td>{formatDateTimeShortYear(ph.ended_at ?? '')}</td>
+                          <td>{formatDurationSeconds(ph.duration_sec ?? 0)}</td>
+                          <td>{round1(ph.avg_speed_kmh ?? 0)} км/ч</td>
+                          <td>{round1(ph.avg_weight_ton ?? 0)} т</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p style={{ color: 'var(--muted)', margin: 0 }}>Нет данных о фазах</p>
+            )}
+          </div>
         </div>
       </div>
     </div>

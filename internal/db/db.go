@@ -39,6 +39,9 @@ func MigrateUp(ctx context.Context, pool *pgxpool.Pool) error {
 		"migrations/007_background_jobs.up.sql",
 		"migrations/008_app_logs.up.sql",
 		"migrations/009_indexes_optimization.up.sql",
+		"migrations/010_trip_template_vectors_zvector.up.sql",
+		"migrations/011_trip_payload_and_phases.up.sql",
+		"migrations/012_trip_phases_trip_id_phase_type.up.sql",
 	} {
 		body, err := migrations.ReadFile(name)
 		if err != nil {

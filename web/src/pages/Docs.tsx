@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import * as api from '../api'
 
 const DOCS: { id: string; label: string }[] = [
   { id: 'README.md', label: 'README' },
   { id: 'docs/API.md', label: 'API' },
   { id: 'docs/ARCHITECTURE.md', label: 'Архитектура' },
+  { id: 'docs/MATH.md', label: 'Математика' },
 ]
 
 export default function Docs() {
@@ -50,7 +54,9 @@ export default function Docs() {
         {loading && <p style={{ color: 'var(--muted)' }}>Загрузка…</p>}
         {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
         {!loading && !error && content !== null && (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+            {content}
+          </ReactMarkdown>
         )}
       </div>
     </div>

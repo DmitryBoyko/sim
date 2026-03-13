@@ -99,6 +99,13 @@ export default function App() {
           </button>
         </nav>
       </aside>
+      {menuOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setMenuOpen(false)}
+          aria-hidden="true"
+        />
+      )}
       <main className="page">
         <header className="page-header">{TAB_TITLES[tab]}</header>
         <div className="page-content">

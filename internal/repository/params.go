@@ -44,20 +44,43 @@ func (r *ParamsRepository) GetSettings(ctx context.Context) (*domain.AppSettings
 			_ = json.Unmarshal(raw, &s.Intervals)
 		case "recognition":
 			_ = json.Unmarshal(raw, &s.Recognition)
+		case "analysis":
+			_ = json.Unmarshal(raw, &s.Analysis)
 		}
+	}
+	// Defaults for analysis if missing
+	if s.Analysis.PlateauHalfWindow == 0 {
+		s.Analysis.PlateauHalfWindow = 3
+	}
+	if s.Analysis.PlateauNoiseToleranceTon == 0 {
+		s.Analysis.PlateauNoiseToleranceTon = 4
+	}
+	if s.Analysis.PayloadThresholdTon == 0 {
+		s.Analysis.PayloadThresholdTon = 20
+	}
+	if s.Analysis.MinPhasePoints == 0 {
+		s.Analysis.MinPhasePoints = 2
+	}
+	// Defaults for new analysis options
+	if !s.Analysis.PlateauGapClosingEnabled {
+		s.Analysis.PlateauGapClosingEnabled = true
+	}
+	if s.Analysis.PlateauMaxGapPoints == 0 {
+		s.Analysis.PlateauMaxGapPoints = 5
 	}
 	return s, rows.Err()
 }
 
 // SaveSettings persists all app params. phases сохраняется целиком (включая delay_after_unload_sec, delay_before_load_sec и phase_duration_deviation_percent).
 func (r *ParamsRepository) SaveSettings(ctx context.Context, s *domain.AppSettings) error {
-	keys := []string{"phases", "speed_weight", "noise", "intervals", "recognition"}
+	keys := []string{"phases", "speed_weight", "noise", "intervals", "recognition", "analysis"}
 	values := []interface{}{
 		mustJSON(s.Phases),
 		mustJSON(s.SpeedWeight),
 		mustJSON(s.Noise),
 		mustJSON(s.Intervals),
 		mustJSON(s.Recognition),
+		mustJSON(s.Analysis),
 	}
 	for i, key := range keys {
 		_, err := r.pool.Exec(ctx, `INSERT INTO app_params (key, value) VALUES ($1, $2)
