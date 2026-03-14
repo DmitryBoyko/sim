@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { LineChart, Settings } from 'lucide-react'
 import ReactECharts from 'echarts-for-react'
 import * as api from '../api'
 import { useSessionPageState } from '../sessionState'
@@ -90,6 +91,8 @@ export default function History() {
   const historyResizeStartX = useRef(0)
   const historyResizeStartWidth = useRef(0)
   const [historyResizing, setHistoryResizing] = useState(false)
+  const [historyTripsSettingsModalOpen, setHistoryTripsSettingsModalOpen] = useState(false)
+  const [historyChartSettingsModalOpen, setHistoryChartSettingsModalOpen] = useState(false)
   const [chartTripsPhases, setChartTripsPhases] = useState<Record<string, TripPhasesResponse>>({})
   const { addToast } = useNotifications()
 
@@ -148,6 +151,7 @@ export default function History() {
       await loadTemplates()
     } catch (e) {
       setError(String(e))
+      throw e
     } finally {
       setLoading(false)
     }
@@ -163,6 +167,7 @@ export default function History() {
       setTrips(t || [])
     } catch (e) {
       setError(String(e))
+      throw e
     } finally {
       setLoadingTrips(false)
     }
@@ -171,6 +176,22 @@ export default function History() {
   const load = async () => {
     await loadChart()
     await loadTrips()
+  }
+  const loadWithToast = async () => {
+    try {
+      await load()
+      addToast('График и рейсы загружены.', 'success')
+    } catch {
+      addToast('Ошибка загрузки.', 'error')
+    }
+  }
+  const loadTripsWithToast = async () => {
+    try {
+      await loadTrips()
+      addToast('Рейсы загружены.', 'success')
+    } catch {
+      addToast('Ошибка загрузки рейсов.', 'error')
+    }
   }
 
   const handleWindowChange = (minutes: number) => {
@@ -218,7 +239,9 @@ export default function History() {
       setTripPhasesData(null)
       addToast('Все рейсы удалены.', 'success')
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     } finally {
       setDeleting(false)
     }
@@ -349,8 +372,11 @@ export default function History() {
       setSelectedTo(null)
       zoomRef.current = null
       await loadTemplates()
+      addToast('Шаблон сохранён.', 'success')
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     }
   }
 
@@ -494,7 +520,7 @@ export default function History() {
             formatter: () => labelText,
             fontSize: 10,
             color: '#888',
-            offset: [0, -6],
+            offset: [0, -2],
             position: 'top',
           },
         },
@@ -600,55 +626,40 @@ export default function History() {
   return (
     <div>
       <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
-        <label className="history-window-row">
-          <span className="history-window-label">Окно:</span>
-          <select
-            value={chartMinutes}
-            onChange={(e) => handleWindowChange(Number(e.target.value))}
-            className="history-window-select"
-          >
-            {CHART_MINUTES_OPTIONS.map((m) => (
-              <option key={m} value={m}>
-                {m} мин
-              </option>
-            ))}
-          </select>
-        </label>
         <label className="history-datetime-row">
           С <input type="datetime-local" value={from} onChange={(e) => setSession({ from: e.target.value })} />
         </label>
         <label className="history-datetime-row">
           По <input type="datetime-local" value={to} onChange={(e) => setSession({ to: e.target.value })} />
         </label>
-        <button className="primary" onClick={load} disabled={loading}>
-          {loading ? 'Загрузка…' : 'Загрузить график'}
+        <button className="primary" onClick={loadWithToast} disabled={loading || loadingTrips}>
+          {loading || loadingTrips ? 'Поиск…' : 'Найти'}
         </button>
-        <button type="button" onClick={loadTrips} disabled={loadingTrips}>
-          {loadingTrips ? 'Загрузка…' : 'Загрузить рейсы'}
-        </button>
-        <button type="button" className="danger" onClick={() => setShowDeleteAllConfirm(true)}>
-          Удалить все рейсы
-        </button>
-        <button
-          type="button"
-          onClick={() => setRecalcConfirmMode('recalc')}
-          disabled={!!recalcJob}
-          title={recalcJob ? `Идёт перерасчёт: ${recalcJob.progress_pct.toFixed(0)}%` : 'Перерасчитать рейсы по выбранному диапазону (С–По) по текущей логике распознавания'}
-        >
-          {recalcJob ? `Перерасчёт… ${recalcJob.progress_pct.toFixed(0)}%` : 'Перерасчитать рейсы'}
-        </button>
-        <button
-          type="button"
-          onClick={() => setRecalcConfirmMode('deleteRecalc')}
-          disabled={!!recalcJob}
-          title={
-            recalcJob
-              ? `Идёт перерасчёт: ${recalcJob.progress_pct.toFixed(0)}%`
-              : 'Удалить рейсы в выбранном диапазоне (С–По) и заново рассчитать по оперативным данным'
-          }
-        >
-          {recalcJob ? `Перерасчёт… ${recalcJob.progress_pct.toFixed(0)}%` : 'Удалить и перерасчитать рейсы'}
-        </button>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginLeft: 'auto' }}>
+          <button type="button" className="danger" onClick={() => setShowDeleteAllConfirm(true)}>
+            Удалить все рейсы
+          </button>
+          <button
+            type="button"
+            onClick={() => setRecalcConfirmMode('recalc')}
+            disabled={!!recalcJob}
+            title={recalcJob ? `Идёт перерасчёт: ${recalcJob.progress_pct.toFixed(0)}%` : 'Перерасчитать рейсы по выбранному диапазону (С–По) по текущей логике распознавания'}
+          >
+            {recalcJob ? `Перерасчёт… ${recalcJob.progress_pct.toFixed(0)}%` : 'Перерасчитать рейсы за период'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setRecalcConfirmMode('deleteRecalc')}
+            disabled={!!recalcJob}
+            title={
+              recalcJob
+                ? `Идёт перерасчёт: ${recalcJob.progress_pct.toFixed(0)}%`
+                : 'Удалить рейсы в выбранном диапазоне (С–По) и заново рассчитать по оперативным данным'
+            }
+          >
+            {recalcJob ? `Перерасчёт… ${recalcJob.progress_pct.toFixed(0)}%` : 'Удалить и перерасчитать рейсы за период'}
+          </button>
+        </div>
         {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
       </div>
 
@@ -656,7 +667,7 @@ export default function History() {
         <div className="modal-overlay" onClick={() => setRecalcConfirmMode(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>
-              {recalcConfirmMode === 'recalc' ? 'Перерасчитать рейсы?' : 'Удалить и перерасчитать рейсы?'}
+              {recalcConfirmMode === 'recalc' ? 'Перерасчитать рейсы за период?' : 'Удалить и перерасчитать рейсы за период?'}
             </h3>
             <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
               {recalcConfirmMode === 'recalc'
@@ -696,19 +707,63 @@ export default function History() {
 
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'stretch', marginTop: '1rem', minHeight: 0 }}>
         <div className="card" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <h3 style={{ marginTop: 0 }}>Исторические данные и рейсы</h3>
-          <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
-            Прямоугольники на графике — найденные рейсы. Выделите участок ползунком или укажите интервал справа, чтобы сохранить его как шаблон.
-          </p>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem', cursor: 'pointer', marginBottom: '0.5rem' }}>
-            <input
-              type="checkbox"
-              checked={showChartPoints}
-              onChange={(e) => setSession({ showChartPoints: e.target.checked })}
-              style={{ width: '1rem', height: '1rem' }}
-            />
-            <span>Показывать точки на графике</span>
-          </label>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+            <h3 style={{ margin: 0 }}>Исторические данные и рейсы</h3>
+            <button
+              type="button"
+              onClick={() => setHistoryChartSettingsModalOpen(true)}
+              title="Настройки графика"
+              aria-label="Настройки графика"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minWidth: 40,
+                minHeight: 40,
+                padding: 0,
+                boxSizing: 'border-box',
+              }}
+            >
+              <Settings size={20} strokeWidth={2} />
+            </button>
+          </div>
+          {historyChartSettingsModalOpen && (
+            <div className="modal-overlay" onClick={() => setHistoryChartSettingsModalOpen(false)}>
+              <div className="modal" onClick={(e) => e.stopPropagation()}>
+                <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Настройки графика</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={showChartPoints}
+                      onChange={(e) => setSession({ showChartPoints: e.target.checked })}
+                      style={{ width: '1rem', height: '1rem' }}
+                    />
+                    <span>Показывать точки на графике</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem' }}>
+                    Окно:
+                    <select
+                      value={chartMinutes}
+                      onChange={(e) => handleWindowChange(Number(e.target.value))}
+                      style={{ padding: '0.35rem 0.5rem', marginLeft: '0.5rem' }}
+                    >
+                      {CHART_MINUTES_OPTIONS.map((m) => (
+                        <option key={m} value={m}>
+                          {m} мин
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div style={{ marginTop: '1.25rem' }}>
+                  <button type="button" onClick={() => setHistoryChartSettingsModalOpen(false)}>
+                    Закрыть
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <ReactECharts
             option={option}
             style={{ height: 400, minHeight: 360 }}
@@ -769,26 +824,56 @@ export default function History() {
       </div>
 
       <div className="card" style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <h3 style={{ marginTop: 0 }}>История рейсов</h3>
-        <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
-          Рейсы загружаются по кнопке «Загрузить рейсы» для выбранного диапазона (С / По). Выберите строку — справа отобразятся фазы. Кнопка «На графике» подгружает данные графика за период рейса.
-        </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-          <span style={{ fontWeight: 600 }}>Всего: {tripsTotal}</span>
-          <span style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Показать:</span>
-          {PAGE_SIZE_OPTIONS.map((size) => (
-            <button
-              key={size}
-              type="button"
-              className={tripsPageSize === size ? 'primary' : ''}
-              onClick={() => {
-                setSession({ tripsPageSize: size, tripsPage: 1 })
-              }}
-            >
-              {size}
-            </button>
-          ))}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <h3 style={{ margin: 0 }}>История рейсов</h3>
+          <button
+            type="button"
+            onClick={() => setHistoryTripsSettingsModalOpen(true)}
+            title="Настройки таблицы"
+            aria-label="Настройки таблицы"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: 40,
+              minHeight: 40,
+              padding: 0,
+              boxSizing: 'border-box',
+            }}
+          >
+            <Settings size={20} strokeWidth={2} />
+          </button>
         </div>
+        {historyTripsSettingsModalOpen && (
+          <div className="modal-overlay" onClick={() => setHistoryTripsSettingsModalOpen(false)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Настройки таблицы</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem' }}>
+                Показать:
+                <select
+                  value={tripsPageSize}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) setSession({ tripsPageSize: n, tripsPage: 1 })
+                  }}
+                  aria-label="Количество на странице"
+                  style={{ padding: '0.35rem 0.5rem', marginLeft: '0.5rem' }}
+                >
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div style={{ marginTop: '1.25rem' }}>
+                <button type="button" onClick={() => setHistoryTripsSettingsModalOpen(false)}>
+                  Закрыть
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div
           ref={historyTripsPhasesContainerRef}
           style={{ display: 'flex', flex: 1, minHeight: 200, alignItems: 'stretch' }}
@@ -801,7 +886,6 @@ export default function History() {
               flexShrink: 0,
               display: 'flex',
               flexDirection: 'column',
-              minHeight: 0,
             }}
           >
             <div
@@ -864,9 +948,23 @@ export default function History() {
                       <td>{t.payload_ton != null ? t.payload_ton.toFixed(1) : '—'}</td>
                       <td>{t.transport_avg_weight_ton != null ? `${round1(t.transport_avg_weight_ton)} т` : '—'}</td>
                       <td><span className="cell-clip" title={t.template_name || 'не найден'}>{t.template_name || 'не найден'}</span></td>
-                      <td>
-                        <button type="button" onClick={(ev) => { ev.stopPropagation(); handleShowTripOnChart(t) }}>
-                          На графике
+                      <td style={{ whiteSpace: 'nowrap' }} onClick={(ev) => ev.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => handleShowTripOnChart(t)}
+                          title="На графике"
+                          aria-label="На графике"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            minWidth: 40,
+                            minHeight: 40,
+                            padding: 0,
+                            boxSizing: 'border-box',
+                          }}
+                        >
+                          <LineChart size={20} strokeWidth={2} />
                         </button>
                       </td>
                     </tr>
@@ -874,16 +972,19 @@ export default function History() {
                 </tbody>
               </table>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap', flexShrink: 0 }}>
-              <button type="button" disabled={!canPrevTrips} onClick={() => setSession((prev) => ({ ...prev, tripsPage: prev.tripsPage - 1 }))}>
-                Назад
-              </button>
-              <span style={{ color: 'var(--muted)' }}>
-                {tripsPage} / {tripsTotalPages}
-              </span>
-              <button type="button" disabled={!canNextTrips} onClick={() => setSession((prev) => ({ ...prev, tripsPage: prev.tripsPage + 1 }))}>
-                Вперед
-              </button>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap', flexShrink: 0 }}>
+              <span style={{ fontWeight: 600 }}>Всего: {tripsTotal}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <button type="button" disabled={!canPrevTrips} onClick={() => setSession((prev) => ({ ...prev, tripsPage: prev.tripsPage - 1 }))}>
+                  Назад
+                </button>
+                <span style={{ color: 'var(--muted)' }}>
+                  {tripsPage} / {tripsTotalPages}
+                </span>
+                <button type="button" disabled={!canNextTrips} onClick={() => setSession((prev) => ({ ...prev, tripsPage: prev.tripsPage + 1 }))}>
+                  Вперед
+                </button>
+              </div>
             </div>
           </div>
 
@@ -909,11 +1010,22 @@ export default function History() {
           />
 
           <div className="card" style={{ flex: 1, minWidth: HISTORY_PHASES_PANEL_MIN_PX, display: 'flex', flexDirection: 'column', minHeight: 0, marginTop: 0 }}>
-            <h3 style={{ marginTop: 0 }}>Фазы рейса</h3>
+            <h3 style={{ marginTop: 0, flexShrink: 0 }}>Фазы рейса</h3>
+            <div style={{ height: 4, marginTop: 2, marginBottom: 6, flexShrink: 0 }}>
+              <div
+                className="phases-loading-bar"
+                style={{
+                  opacity: loadingPhases ? 1 : 0,
+                  transition: 'opacity 0.25s ease-out',
+                  pointerEvents: 'none',
+                }}
+                aria-hidden
+              />
+            </div>
             {!selectedTripId ? (
               <p style={{ color: 'var(--muted)', margin: 0 }}>Выберите рейс в таблице слева</p>
             ) : loadingPhases ? (
-              <p style={{ color: 'var(--muted)', margin: 0 }}>Загрузка фаз…</p>
+              <div style={{ flex: 1, minHeight: 0 }} />
             ) : tripPhasesData && tripPhasesData.phases.length > 0 ? (
               <div style={{ overflowX: 'auto', flex: 1, minHeight: 0 }}>
                 <table className="data-table operational-phases-table">

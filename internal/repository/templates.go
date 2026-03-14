@@ -82,10 +82,11 @@ func (r *TemplatesRepository) ListWithVectors(ctx context.Context) ([]domain.Tri
 	return out, rows.Err()
 }
 
-// TemplateListItem is template with has_vector for list API.
+// TemplateListItem is template with has_vector and has_z_vector for list API.
 type TemplateListItem struct {
 	domain.TripTemplate
-	HasVector bool `json:"has_vector"`
+	HasVector   bool `json:"has_vector"`
+	HasZVector  bool `json:"has_z_vector"`
 }
 
 // List returns all templates with has_vector flag (no raw arrays).
@@ -105,7 +106,8 @@ func (r *TemplatesRepository) ListWithPagination(ctx context.Context, limit, off
 	query := `
 		SELECT t.id, t.name, t.created_at, t.interval_start, t.interval_end, t.speed_count, t.weight_count,
 		       COALESCE(t.raw_ts, '[]'::jsonb) AS raw_ts,
-		       (v.template_id IS NOT NULL) AS has_vector
+		       (v.template_id IS NOT NULL) AS has_vector,
+		       (v.zvector IS NOT NULL AND jsonb_typeof(v.zvector) = 'array' AND jsonb_array_length(v.zvector) > 0) AS has_z_vector
 		FROM trip_templates t
 		LEFT JOIN trip_template_vectors v ON v.template_id = t.id
 		ORDER BY t.created_at DESC
@@ -124,7 +126,7 @@ func (r *TemplatesRepository) ListWithPagination(ctx context.Context, limit, off
 	for rows.Next() {
 		var t TemplateListItem
 		var rawTS []byte
-		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt, &t.IntervalStart, &t.IntervalEnd, &t.SpeedCount, &t.WeightCount, &rawTS, &t.HasVector); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt, &t.IntervalStart, &t.IntervalEnd, &t.SpeedCount, &t.WeightCount, &rawTS, &t.HasVector, &t.HasZVector); err != nil {
 			return nil, 0, err
 		}
 		// Если в БД нет границ — извлекаем из raw_ts (старые шаблоны или данные без interval_start/end)

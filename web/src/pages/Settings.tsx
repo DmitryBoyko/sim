@@ -1,7 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Accordion, AccordionContent, AccordionHeader, AccordionItem, AccordionTrigger } from '@radix-ui/react-accordion'
 import * as api from '../api'
 import { useNotifications } from '../contexts/Notifications'
 import type { AppSettings } from '../api'
+
+const triggerStyle: React.CSSProperties = {
+  width: '100%',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: '0.75rem',
+  padding: 0,
+  margin: 0,
+  border: 'none',
+  background: 'transparent',
+  color: 'inherit',
+  textAlign: 'left',
+  cursor: 'pointer',
+  font: 'inherit',
+}
 
 const defaultAnalysis = {
   plateau_half_window: 3,
@@ -18,14 +35,16 @@ export default function Settings() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { addToast } = useNotifications()
-  const [sectionsOpen, setSectionsOpen] = useState({
-    phases: true,
-    speed: true,
-    noise: false,
-    intervals: false,
-    recognition: false,
-    analysis: false,
-  })
+  const [accordionValue, setAccordionValue] = useState<string[]>([])
+  const accordionCooldownRef = useRef(0)
+  const ACCORDION_COOLDOWN_MS = 280
+
+  const handleAccordionValueChange = (value: string[]) => {
+    const now = Date.now()
+    if (now - accordionCooldownRef.current < ACCORDION_COOLDOWN_MS) return
+    accordionCooldownRef.current = now
+    setAccordionValue(value)
+  }
 
   useEffect(() => {
     api.getSettings().then(setS).catch((e) => setError(String(e)))
@@ -47,7 +66,9 @@ export default function Settings() {
       await api.putSettings(toSave)
       addToast('Настройки сохранены.', 'success')
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     } finally {
       setSaving(false)
     }
@@ -58,84 +79,24 @@ export default function Settings() {
   return (
     <div>
       {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-      <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
-        <div style={{ fontWeight: 600 }}>Секции настроек</div>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            onClick={() => setSectionsOpen({ phases: true, speed: true, noise: true, intervals: true, recognition: true, analysis: true })}
-            aria-label="Развернуть все секции"
-            title="Развернуть все"
-            style={{
-              width: 32,
-              height: 32,
-              minWidth: 32,
-              minHeight: 32,
-              maxWidth: 32,
-              maxHeight: 32,
-              borderRadius: '50%',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 0,
-              fontSize: 18,
-              lineHeight: 0,
-            }}
-          >
-            +
-          </button>
-          <button
-            type="button"
-            onClick={() => setSectionsOpen({ phases: false, speed: false, noise: false, intervals: false, recognition: false, analysis: false })}
-            aria-label="Свернуть все секции"
-            title="Свернуть все"
-            style={{
-              width: 32,
-              height: 32,
-              minWidth: 32,
-              minHeight: 32,
-              maxWidth: 32,
-              maxHeight: 32,
-              borderRadius: '50%',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 0,
-              fontSize: 18,
-              lineHeight: 0,
-            }}
-          >
-            −
-          </button>
-        </div>
-      </div>
-
-      <div className="card">
-        <button
-          type="button"
-          onClick={() => setSectionsOpen((prev) => ({ ...prev, phases: !prev.phases }))}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '0.75rem',
-            padding: 0,
-            margin: 0,
-            border: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            textAlign: 'left',
-            cursor: 'pointer',
-          }}
-        >
-          <h3 style={{ margin: 0 }}>Фазы рейса (сек)</h3>
-          <span style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
-            {sectionsOpen.phases ? '▾' : '▸'}
-          </span>
-        </button>
-        {sectionsOpen.phases && (
-          <>
+      <Accordion
+        type="multiple"
+        collapsible
+        value={accordionValue}
+        onValueChange={handleAccordionValueChange}
+        className="settings-accordion"
+      >
+        <AccordionItem value="phases" className="card">
+          <AccordionHeader>
+            <AccordionTrigger className="settings-accordion-trigger" style={triggerStyle}>
+              <h3 style={{ margin: 0 }}>Фазы рейса (сек)</h3>
+              <span className="settings-accordion-chevron" style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
+                <span className="chevron-open" aria-hidden>▾</span>
+                <span className="chevron-closed" aria-hidden>▸</span>
+              </span>
+            </AccordionTrigger>
+          </AccordionHeader>
+          <AccordionContent className="settings-accordion-content">
             <div className="form-row" style={{ marginTop: '0.75rem' }}>
               <label>Погрузка</label>
               <input
@@ -201,36 +162,20 @@ export default function Settings() {
                 onChange={(e) => update('phases', { ...s.phases, delay_before_load_sec: +e.target.value })}
               />
             </div>
-          </>
-        )}
-      </div>
+          </AccordionContent>
+        </AccordionItem>
 
-      <div className="card">
-        <button
-          type="button"
-          onClick={() => setSectionsOpen((prev) => ({ ...prev, speed: !prev.speed }))}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '0.75rem',
-            padding: 0,
-            margin: 0,
-            border: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            textAlign: 'left',
-            cursor: 'pointer',
-          }}
-        >
-          <h3 style={{ margin: 0 }}>Скорость и вес</h3>
-          <span style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
-            {sectionsOpen.speed ? '▾' : '▸'}
-          </span>
-        </button>
-        {sectionsOpen.speed && (
-          <>
+        <AccordionItem value="speed" className="card">
+          <AccordionHeader>
+            <AccordionTrigger className="settings-accordion-trigger" style={triggerStyle}>
+              <h3 style={{ margin: 0 }}>Скорость и вес</h3>
+              <span className="settings-accordion-chevron" style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
+                <span className="chevron-open" aria-hidden>▾</span>
+                <span className="chevron-closed" aria-hidden>▸</span>
+              </span>
+            </AccordionTrigger>
+          </AccordionHeader>
+          <AccordionContent className="settings-accordion-content">
             <div className="form-row" style={{ marginTop: '0.75rem' }}>
               <label>Vmin, км/ч</label>
               <input
@@ -276,36 +221,20 @@ export default function Settings() {
                 onChange={(e) => update('speed_weight', { ...s.speed_weight, m_empty_ton: +e.target.value })}
               />
             </div>
-          </>
-        )}
-      </div>
+          </AccordionContent>
+        </AccordionItem>
 
-      <div className="card">
-        <button
-          type="button"
-          onClick={() => setSectionsOpen((prev) => ({ ...prev, noise: !prev.noise }))}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '0.75rem',
-            padding: 0,
-            margin: 0,
-            border: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            textAlign: 'left',
-            cursor: 'pointer',
-          }}
-        >
-          <h3 style={{ margin: 0 }}>Шум</h3>
-          <span style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
-            {sectionsOpen.noise ? '▾' : '▸'}
-          </span>
-        </button>
-        {sectionsOpen.noise && (
-          <>
+        <AccordionItem value="noise" className="card">
+          <AccordionHeader>
+            <AccordionTrigger className="settings-accordion-trigger" style={triggerStyle}>
+              <h3 style={{ margin: 0 }}>Шум</h3>
+              <span className="settings-accordion-chevron" style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
+                <span className="chevron-open" aria-hidden>▾</span>
+                <span className="chevron-closed" aria-hidden>▸</span>
+              </span>
+            </AccordionTrigger>
+          </AccordionHeader>
+          <AccordionContent className="settings-accordion-content">
             <div className="form-row" style={{ marginTop: '0.75rem' }}>
               <label>Шум скорости, км/ч</label>
               <input
@@ -335,36 +264,20 @@ export default function Settings() {
               />
               <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Амортизаторы при наращивании веса</span>
             </div>
-          </>
-        )}
-      </div>
+          </AccordionContent>
+        </AccordionItem>
 
-      <div className="card">
-        <button
-          type="button"
-          onClick={() => setSectionsOpen((prev) => ({ ...prev, intervals: !prev.intervals }))}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '0.75rem',
-            padding: 0,
-            margin: 0,
-            border: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            textAlign: 'left',
-            cursor: 'pointer',
-          }}
-        >
-          <h3 style={{ margin: 0 }}>Интервалы</h3>
-          <span style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
-            {sectionsOpen.intervals ? '▾' : '▸'}
-          </span>
-        </button>
-        {sectionsOpen.intervals && (
-          <>
+        <AccordionItem value="intervals" className="card">
+          <AccordionHeader>
+            <AccordionTrigger className="settings-accordion-trigger" style={triggerStyle}>
+              <h3 style={{ margin: 0 }}>Интервалы</h3>
+              <span className="settings-accordion-chevron" style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
+                <span className="chevron-open" aria-hidden>▾</span>
+                <span className="chevron-closed" aria-hidden>▸</span>
+              </span>
+            </AccordionTrigger>
+          </AccordionHeader>
+          <AccordionContent className="settings-accordion-content">
             <div className="form-row" style={{ marginTop: '0.75rem' }}>
               <label>Интервал генерации, сек</label>
               <input
@@ -381,36 +294,20 @@ export default function Settings() {
                 onChange={(e) => update('intervals', { ...s.intervals, chart_minutes: +e.target.value })}
               />
             </div>
-          </>
-        )}
-      </div>
+          </AccordionContent>
+        </AccordionItem>
 
-      <div className="card">
-        <button
-          type="button"
-          onClick={() => setSectionsOpen((prev) => ({ ...prev, recognition: !prev.recognition }))}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '0.75rem',
-            padding: 0,
-            margin: 0,
-            border: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            textAlign: 'left',
-            cursor: 'pointer',
-          }}
-        >
-          <h3 style={{ margin: 0 }}>Распознавание рейсов</h3>
-          <span style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
-            {sectionsOpen.recognition ? '▾' : '▸'}
-          </span>
-        </button>
-        {sectionsOpen.recognition && (
-          <>
+        <AccordionItem value="recognition" className="card">
+          <AccordionHeader>
+            <AccordionTrigger className="settings-accordion-trigger" style={triggerStyle}>
+              <h3 style={{ margin: 0 }}>Распознавание рейсов</h3>
+              <span className="settings-accordion-chevron" style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
+                <span className="chevron-open" aria-hidden>▾</span>
+                <span className="chevron-closed" aria-hidden>▸</span>
+              </span>
+            </AccordionTrigger>
+          </AccordionHeader>
+          <AccordionContent className="settings-accordion-content">
             <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginTop: '0.75rem' }}>
               Размеры окна берутся из шаблонов (от меньшего к большему). Включение распознавания — на странице «Симуляция».
             </p>
@@ -490,36 +387,20 @@ export default function Settings() {
             >
               Min-Max — деление на глобальные максимумы (Vmax, Mmax). Чувствителен к абсолютным значениям. Z-нормализация — среднее=0, σ=1, сравнивает только форму сигнала. Рекомендуется при разных условиях загрузки или дрейфе датчиков.
             </p>
-          </>
-        )}
-      </div>
+          </AccordionContent>
+        </AccordionItem>
 
-      <div className="card">
-        <button
-          type="button"
-          onClick={() => setSectionsOpen((prev) => ({ ...prev, analysis: !prev.analysis }))}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '0.75rem',
-            padding: 0,
-            margin: 0,
-            border: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            textAlign: 'left',
-            cursor: 'pointer',
-          }}
-        >
-          <h3 style={{ margin: 0 }}>Анализ рейсов</h3>
-          <span style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
-            {sectionsOpen.analysis ? '▾' : '▸'}
-          </span>
-        </button>
-        {sectionsOpen.analysis && (
-          <>
+        <AccordionItem value="analysis" className="card">
+          <AccordionHeader>
+            <AccordionTrigger className="settings-accordion-trigger" style={triggerStyle}>
+              <h3 style={{ margin: 0 }}>Анализ рейсов</h3>
+              <span className="settings-accordion-chevron" style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>
+                <span className="chevron-open" aria-hidden>▾</span>
+                <span className="chevron-closed" aria-hidden>▸</span>
+              </span>
+            </AccordionTrigger>
+          </AccordionHeader>
+          <AccordionContent className="settings-accordion-content">
             <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginTop: '0.75rem' }}>
               Анализ фаз рейса определяет участки плато по весу (Plateau Detection). Высокое плато = транспортировка, низкое = возврат. Переходные участки = погрузка и разгрузка. Вес груза = медиана(транспортировка) − медиана(возврат).
             </p>
@@ -617,9 +498,9 @@ export default function Settings() {
                 скорость ≤ порога. Уменьшает расчётное время погрузки и разгрузки. Рекомендуется оставить включённым.
               </span>
             </div>
-          </>
-        )}
-      </div>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
 
       <div className="card">
         <button className="primary" onClick={save} disabled={saving}>

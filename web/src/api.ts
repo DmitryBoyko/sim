@@ -80,7 +80,7 @@ export type TripTemplate = {
   raw_weight?: number[]
   raw_ts?: string[]
 }
-export type TripTemplateListItem = TripTemplate & { has_vector: boolean }
+export type TripTemplateListItem = TripTemplate & { has_vector: boolean; has_z_vector?: boolean }
 export type DetectedTrip = {
   id: string
   started_at: string

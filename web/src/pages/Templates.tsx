@@ -1,11 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
 import * as api from '../api'
+import { useNotifications } from '../contexts/Notifications'
 import { useSessionPageState } from '../sessionState'
 import { formatDateTime, formatTripInterval, round1, tripIntervalSeconds } from '../utils/format'
 import type { TripTemplate, TripTemplateListItem } from '../api'
 
-const PAGE_SIZE_OPTIONS = [5, 10] as const
+const PAGE_SIZE_OPTIONS = [5, 10, 50] as const
+const iconStyle = { stroke: 'currentColor', fill: 'none' as const, strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+/** Иконки-кнопки в таблице: мин. 40×40px (принятый минимум для кликабельной области). */
+const iconButtonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 40,
+  minHeight: 40,
+  padding: 0,
+  marginRight: '0.25rem',
+  boxSizing: 'border-box',
+}
 
 const TEMPLATES_SESSION_DEFAULTS = {
   pageSize: 10,
@@ -43,6 +56,7 @@ function filterTemplates(
 }
 
 export default function Templates() {
+  const { addToast } = useNotifications()
   const [session, setSession] = useSessionPageState('templates', TEMPLATES_SESSION_DEFAULTS)
   const { pageSize, page, searchName, searchDurationMinSec, searchDurationMaxSec } = session
 
@@ -60,7 +74,9 @@ export default function Templates() {
   const [editFromIndex, setEditFromIndex] = useState(0)
   const [editToIndex, setEditToIndex] = useState(0)
   const [editMaxPoints, setEditMaxPoints] = useState(0)
+  const [focusedIndex, setFocusedIndex] = useState(0)
   const zoomRef = useRef<{ start: number; end: number } | null>(null)
+  const tableWrapperRef = useRef<HTMLDivElement>(null)
 
   const hasActiveSearch =
     searchName.trim() !== '' || searchDurationMinSec.trim() !== '' || searchDurationMaxSec.trim() !== ''
@@ -68,8 +84,9 @@ export default function Templates() {
   const loadPaginated = useCallback(async (limit: number, offset: number) => {
     try {
       const res = await api.getTemplates({ limit, offset })
-      setList(res.templates || [])
-      setTotal(res.total ?? res.templates?.length ?? 0)
+      const templates = res.templates || []
+      setList(templates.slice(0, limit))
+      setTotal(res.total ?? templates.length)
       setFullList([])
       setUseSearch(false)
       setError(null)
@@ -118,6 +135,10 @@ export default function Templates() {
       setSession((prev) => ({ ...prev, page: prev.page - 1 }))
     }
   }, [list.length, total, page])
+
+  useEffect(() => {
+    setFocusedIndex((prev) => (list.length ? Math.min(prev, list.length - 1) : 0))
+  }, [list.length])
 
   useEffect(() => {
     if (hasActiveSearch) setSession((prev) => ({ ...prev, page: 1 }))
@@ -173,8 +194,11 @@ export default function Templates() {
       setSelectedTemplate(null)
       zoomRef.current = null
       loadPaginated(pageSize, (page - 1) * pageSize)
+      addToast('Шаблон обновлён.', 'success')
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     }
   }
 
@@ -206,8 +230,11 @@ export default function Templates() {
       await api.deleteTemplate(id)
       if (selectedId === id) handleCloseSelection()
       loadPaginated(pageSize, (page - 1) * pageSize)
+      addToast('Шаблон удалён.', 'success')
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     }
   }
 
@@ -289,54 +316,53 @@ export default function Templates() {
   return (
     <div>
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Шаблоны рейсов</h3>
-        {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
+        {error && <p style={{ color: 'var(--danger)', marginBottom: '0.5rem' }}>{error}</p>}
         <div
           style={{
             background: 'var(--bg)',
             borderRadius: 8,
-            padding: '1rem',
+            padding: '0.75rem 1rem',
             marginBottom: '1rem',
             border: '1px solid var(--border)',
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: '0.75rem', fontSize: '0.95rem' }}>Поиск</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '1rem' }}>
-            <div className="form-row" style={{ marginBottom: 0 }}>
-              <label htmlFor="templates-search-name">Имя шаблона</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem 1.25rem' }}>
+            <span style={{ fontWeight: 600, fontSize: '0.95rem', marginRight: '0.25rem' }}>Поиск</span>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--muted)', fontSize: '0.9rem' }}>
+              Имя:
               <input
                 id="templates-search-name"
                 type="text"
-                placeholder="Подстрока в названии"
+                placeholder="подстрока"
                 value={searchName}
                 onChange={(e) => setSession({ searchName: e.target.value })}
-                style={{ width: 200 }}
+                style={{ width: 140 }}
               />
-            </div>
-            <div className="form-row" style={{ marginBottom: 0 }}>
-              <label htmlFor="templates-search-duration-min">Длительность от, сек</label>
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--muted)', fontSize: '0.9rem' }}>
+              Длительность от, сек:
               <input
                 id="templates-search-duration-min"
                 type="number"
                 min={0}
-                placeholder="Не менее"
+                placeholder="мин"
                 value={searchDurationMinSec}
                 onChange={(e) => setSession({ searchDurationMinSec: e.target.value })}
-                style={{ width: 110 }}
+                style={{ width: 72 }}
               />
-            </div>
-            <div className="form-row" style={{ marginBottom: 0 }}>
-              <label htmlFor="templates-search-duration-max">Длительность до, сек</label>
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--muted)', fontSize: '0.9rem' }}>
+              Длительность до, сек:
               <input
                 id="templates-search-duration-max"
                 type="number"
                 min={0}
-                placeholder="Не более"
+                placeholder="макс"
                 value={searchDurationMaxSec}
                 onChange={(e) => setSession({ searchDurationMaxSec: e.target.value })}
-                style={{ width: 110 }}
+                style={{ width: 72 }}
               />
-            </div>
+            </label>
             {hasActiveSearch && (
               <button
                 type="button"
@@ -349,27 +375,34 @@ export default function Templates() {
             )}
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-          <span style={{ fontWeight: 600 }}>Всего: {total}</span>
-          <span style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Показать:</span>
-          {PAGE_SIZE_OPTIONS.map((size) => (
-            <button
-              key={size}
-              type="button"
-              className={pageSize === size ? 'primary' : ''}
-              onClick={() => {
-                setSession({ pageSize: size, page: 1 })
-              }}
-            >
-              {size}
-            </button>
-          ))}
-        </div>
-        <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
-          Время интервала показывается для шаблонов, сохранённых с указанием интервала на странице «Симуляция».
-        </p>
-        <div style={{ overflowX: 'auto', maxHeight: 320, overflowY: 'auto' }}>
-          <table className="data-table">
+        <div
+          ref={tableWrapperRef}
+          tabIndex={0}
+          role="grid"
+          aria-label="Шаблоны рейсов"
+          style={{ overflowX: 'auto', maxHeight: 320, overflowY: 'auto', outline: 'none' }}
+          onKeyDown={(e) => {
+            if (list.length === 0) return
+            if (e.key === 'ArrowDown') {
+              e.preventDefault()
+              const nextIndex = focusedIndex < list.length - 1 ? focusedIndex + 1 : focusedIndex
+              setFocusedIndex(nextIndex)
+              const t = list[nextIndex]
+              if (t) handleView(t.id)
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              const nextIndex = focusedIndex > 0 ? focusedIndex - 1 : focusedIndex
+              setFocusedIndex(nextIndex)
+              const t = list[nextIndex]
+              if (t) handleView(t.id)
+            } else if (e.key === 'Enter') {
+              e.preventDefault()
+              const t = list[focusedIndex]
+              if (t) handleView(t.id)
+            }
+          }}
+        >
+          <table className="data-table data-table-templates">
             <thead>
               <tr>
                 <th>Начало интервала</th>
@@ -377,35 +410,49 @@ export default function Templates() {
                 <th>Длительность</th>
                 <th>Наименование</th>
                 <th>Диапазон (точек: скорость / вес)</th>
-                <th>Вектор посчитан</th>
+                <th>Min/Max вектор рассчитан</th>
+                <th>Z-нормализация</th>
                 <th>Действия</th>
               </tr>
             </thead>
             <tbody>
               {list.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ color: 'var(--muted)' }}>
+                  <td colSpan={8} style={{ color: 'var(--muted)' }}>
                     Нет шаблонов
                   </td>
                 </tr>
               )}
-              {list.map((t) => (
-                <tr key={t.id}>
+              {list.map((t, idx) => (
+                <tr
+                  key={t.id}
+                  className={selectedId === t.id ? 'selected' : idx === focusedIndex ? 'focused' : ''}
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('button')) {
+                      setFocusedIndex(idx)
+                      handleView(t.id)
+                    }
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
                   <td>{t.interval_start ? formatDateTime(t.interval_start) : '—'}</td>
                   <td>{t.interval_end ? formatDateTime(t.interval_end) : '—'}</td>
                   <td>{t.interval_start && t.interval_end ? formatTripInterval(t.interval_start, t.interval_end) : '—'}</td>
                   <td>{t.name}</td>
                   <td>{rangeLabel(t)}</td>
                   <td>{t.has_vector ? 'Да' : 'Нет'}</td>
-                  <td>
-                    <button type="button" onClick={() => handleView(t.id)}>
-                      Просмотр
+                  <td>{t.has_z_vector ? 'Да' : 'Нет'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); handleEdit(t) }} title="Изменить" aria-label="Изменить" style={iconButtonStyle}>
+                      <svg viewBox="0 0 24 24" width={20} height={20} style={iconStyle}>
+                        <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                        <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
                     </button>
-                    <button type="button" onClick={() => handleEdit(t)}>
-                      Изменить
-                    </button>
-                    <button type="button" className="danger" onClick={() => handleDelete(t.id, t.name)}>
-                      Удалить
+                    <button type="button" className="danger" onClick={(e) => { e.stopPropagation(); handleDelete(t.id, t.name) }} title="Удалить" aria-label="Удалить" style={{ ...iconButtonStyle, marginRight: 0 }}>
+                      <svg viewBox="0 0 24 24" width={20} height={20} style={iconStyle}>
+                        <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" />
+                      </svg>
                     </button>
                   </td>
                 </tr>
@@ -413,16 +460,37 @@ export default function Templates() {
             </tbody>
           </table>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-          <button type="button" disabled={!canPrev} onClick={() => setSession((prev) => ({ ...prev, page: prev.page - 1 }))}>
-            Назад
-          </button>
-          <span style={{ color: 'var(--muted)' }}>
-            {page} / {totalPages}
-          </span>
-          <button type="button" disabled={!canNext} onClick={() => setSession((prev) => ({ ...prev, page: prev.page + 1 }))}>
-            Вперед
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--muted)', font: 'inherit' }}>Всего: {total}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', font: 'inherit' }}>
+              Показать:
+              <select
+                value={String(pageSize)}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) setSession({ pageSize: n, page: 1 })
+                }}
+                aria-label="Количество на странице"
+                style={{ padding: '0.5rem 1rem', minHeight: 44, font: 'inherit', boxSizing: 'border-box' }}
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" disabled={!canPrev} onClick={() => setSession((prev) => ({ ...prev, page: prev.page - 1 }))}>
+              Назад
+            </button>
+            <span style={{ color: 'var(--muted)', font: 'inherit' }}>
+              {page} / {totalPages}
+            </span>
+            <button type="button" disabled={!canNext} onClick={() => setSession((prev) => ({ ...prev, page: prev.page + 1 }))}>
+              Вперед
+            </button>
+          </div>
         </div>
       </div>
 

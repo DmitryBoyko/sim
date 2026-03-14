@@ -52,13 +52,6 @@ export default function App() {
             </svg>
             <span className="nav-label">Симуляция</span>
           </button>
-          <button type="button" className={tab === 'settings' ? 'active' : ''} onClick={() => go('settings')} title="Настройки">
-            <svg className="nav-icon" viewBox="0 0 24 24" width={24} height={24} {...iconStyle}>
-              <circle cx="12" cy="12" r="3" />
-              <path d="M12 2v3M12 19v3M2 12h3M19 12h3M5.64 5.64l2.12 2.12M16.24 16.24l2.12 2.12M5.64 18.36l2.12-2.12M16.24 7.76l2.12-2.12" />
-            </svg>
-            <span className="nav-label">Настройки</span>
-          </button>
           <button type="button" className={tab === 'templates' ? 'active' : ''} onClick={() => go('templates')} title="Шаблоны рейсов">
             <svg className="nav-icon" viewBox="0 0 24 24" width={24} height={24} {...iconStyle}>
               <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
@@ -89,6 +82,13 @@ export default function App() {
               <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
             </svg>
             <span className="nav-label">Лог</span>
+          </button>
+          <button type="button" className={tab === 'settings' ? 'active' : ''} onClick={() => go('settings')} title="Настройки">
+            <svg className="nav-icon" viewBox="0 0 24 24" width={24} height={24} {...iconStyle}>
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 2v3M12 19v3M2 12h3M19 12h3M5.64 5.64l2.12 2.12M16.24 16.24l2.12 2.12M5.64 18.36l2.12-2.12M16.24 7.76l2.12-2.12" />
+            </svg>
+            <span className="nav-label">Настройки</span>
           </button>
           <button type="button" className={tab === 'docs' ? 'active' : ''} onClick={() => go('docs')} title="Документация">
             <svg className="nav-icon" viewBox="0 0 24 24" width={24} height={24} {...iconStyle}>

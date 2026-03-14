@@ -54,12 +54,14 @@ export default function Log() {
   const load = async () => {
     if (!from || !to) {
       setError('Укажите период (от и до)')
+      addToast('Укажите период (От и До)', 'error')
       return
     }
     const fromISO = new Date(from).toISOString()
     const toISO = new Date(to).toISOString()
     if (new Date(from) > new Date(to)) {
       setError('«От» должно быть раньше «до»')
+      addToast('«От» должно быть раньше «До»', 'error')
       return
     }
     setLoading(true)
@@ -73,8 +75,11 @@ export default function Log() {
         limit,
       })
       setLogs(list || [])
+      addToast('Лог загружен.', 'success')
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     } finally {
       setLoading(false)
     }

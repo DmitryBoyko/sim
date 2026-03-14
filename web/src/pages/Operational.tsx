@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Settings } from 'lucide-react'
 import ReactECharts from 'echarts-for-react'
 import * as api from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useNotifications } from '../contexts/Notifications'
 import { useSessionPageState } from '../sessionState'
 import { logError } from '../lib/frontendLog'
 import { formatDateTime, formatDateTimeShortYear, formatDurationSeconds, formatTripInterval, formatMs, round1 } from '../utils/format'
@@ -21,6 +23,25 @@ const resourceStatusLabel: Record<ResourceStatus, string> = {
   green: 'в норме',
   yellow: 'насторожиться',
   red: 'на пределе',
+}
+
+/** Паттерн диагональных полос для заливки зоны «Слайд» (косые линии). */
+function createDiagonalStripesPattern(): HTMLCanvasElement {
+  const size = 16
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return canvas
+  ctx.strokeStyle = 'rgba(88, 166, 255, 0.25)'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  for (let i = -size; i <= size * 2; i += 4) {
+    ctx.moveTo(i, -size)
+    ctx.lineTo(i + size * 2, size * 2)
+  }
+  ctx.stroke()
+  return canvas
 }
 const metricRowStyle: React.CSSProperties = {
   margin: '0.35rem 0',
@@ -61,14 +82,15 @@ const OPERATIONAL_SESSION_DEFAULTS = {
   showChartPoints: false,
   showSlideZone: false,
   /** Ширина левой панели «Найденные рейсы» в px (правая «Фазы рейса» занимает остаток). */
-  tripsPanelWidthPxV4: 900,
+  tripsPanelWidthPxV4: 1000,
 }
 const TRIPS_PANEL_MIN_PX = 0
-const TRIPS_PANEL_MAX_PX = 950
+const TRIPS_PANEL_MAX_PX = 1050
 const RESIZER_WIDTH_PX = 6
 const PHASES_PANEL_MIN_PX = 0
 
 export default function Operational() {
+  const { addToast } = useNotifications()
   const [session, setSession] = useSessionPageState('operational', OPERATIONAL_SESSION_DEFAULTS)
   const { chartMinutes, tripsLimit, showChartPoints, showSlideZone, tripsPanelWidthPxV4 } = session
   const tripsPhasesContainerRef = useRef<HTMLDivElement>(null)
@@ -84,6 +106,8 @@ export default function Operational() {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<'start' | 'stop' | 'clear' | null>(null)
+  const [chartSettingsModalOpen, setChartSettingsModalOpen] = useState(false)
+  const [tripsLimitModalOpen, setTripsLimitModalOpen] = useState(false)
   const [selectedFrom, setSelectedFrom] = useState<number | null>(null)
   const [selectedTo, setSelectedTo] = useState<number | null>(null)
   const [stats, setStats] = useState<OperationalStats | null>(null)
@@ -239,28 +263,23 @@ export default function Operational() {
     return () => clearInterval(id)
   }, [running, stats?.last_started_at])
 
-  const recognitionEnabled = settings?.recognition?.enabled ?? false
-  const handleToggleRecognition = async () => {
-    if (!settings) return
-    const next = !settings.recognition.enabled
-    try {
-      await api.putSettings({
-        ...settings,
-        recognition: { ...settings.recognition, enabled: next },
-      })
-      setSettings((prev) => (prev ? { ...prev, recognition: { ...prev.recognition, enabled: next } } : null))
-    } catch (e) {
-      setError(String(e))
-    }
-  }
-
   const handleStart = async () => {
     setError(null)
     try {
+      if (settings) {
+        await api.putSettings({
+          ...settings,
+          recognition: { ...settings.recognition, enabled: true },
+        })
+        setSettings((prev) => (prev ? { ...prev, recognition: { ...prev.recognition, enabled: true } } : null))
+      }
       await api.controlStart()
       setRunning(true)
+      addToast('Генерация запущена.', 'success')
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     }
   }
 
@@ -268,8 +287,11 @@ export default function Operational() {
     try {
       await api.controlStop()
       setRunning(false)
+      addToast('Генерация остановлена.', 'success')
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     }
   }
 
@@ -278,8 +300,11 @@ export default function Operational() {
       await api.controlClear()
       setPoints([])
       setTrips([])
+      addToast('Данные очищены.', 'success')
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     }
   }
 
@@ -294,6 +319,11 @@ export default function Operational() {
   const speedData = points.map((p) => round1(p.speed))
   const weightData = points.map((p) => round1(p.weight))
 
+  const timeToIndex = (t: string) => {
+    const i = times.findIndex((x) => x >= t)
+    return i >= 0 ? i : times.length - 1
+  }
+
   const zoomStart =
     zoomRef.current != null
       ? zoomRef.current.start
@@ -306,6 +336,8 @@ export default function Operational() {
       : selectedTo != null && points.length > 0
         ? ((selectedTo + 1) / points.length) * 100
         : 100
+
+  const slideZonePattern = useMemo(() => createDiagonalStripesPattern(), [])
 
   const slidingWindowMarkArea =
     showSlideZone &&
@@ -326,11 +358,115 @@ export default function Operational() {
           if (from < 0 || to < 0 || from > to) return undefined
           return {
             silent: true,
-            data: [[{ xAxis: from, label: { show: true, formatter: 'Слайд', fontSize: 10, color: '#888' } }, { xAxis: to }]],
-            itemStyle: { color: 'rgba(88, 166, 255, 0.12)' },
+            data: [
+              [
+                {
+                  xAxis: from,
+                  label: { show: true, formatter: 'Слайд', fontSize: 10, color: '#888' },
+                  itemStyle: {
+                    borderType: 'dashed',
+                    borderColor: 'rgba(88, 166, 255, 0.6)',
+                    borderWidth: 1,
+                    color: { image: slideZonePattern, repeat: 'repeat' },
+                  },
+                },
+                { xAxis: to },
+              ],
+            ],
           }
         })()
       : undefined
+
+  // Найденные рейсы на графике: прямоугольник с угловой сеткой (border), подпись сверху как в Истории
+  const chartFirstTime = times.length > 0 ? new Date(times[0]).getTime() : 0
+  const chartLastTime = times.length > 0 ? new Date(times[times.length - 1]).getTime() : 0
+  const tripsInChart = points.length > 0
+    ? trips.filter((t) => {
+        const start = new Date(t.started_at).getTime()
+        const end = new Date(t.ended_at).getTime()
+        return end >= chartFirstTime && start <= chartLastTime
+      })
+    : []
+
+  const tripMarkAreaData: [unknown, unknown][] = tripsInChart.map((t) => {
+    const i1 = times.findIndex((x) => x >= t.started_at)
+    const i2 = times.findIndex((x) => x >= t.ended_at)
+    const start = i1 >= 0 ? i1 : 0
+    const end = i2 >= 0 ? i2 : times.length - 1
+    const name = t.template_name || 'не найден'
+    const startStr = formatDateTime(t.started_at)
+    const endStr = formatDateTime(t.ended_at)
+    const payloadStr = t.transport_avg_weight_ton != null ? `Ср. вес: ${round1(t.transport_avg_weight_ton)} т` : ''
+    const labelText = payloadStr ? `${name}\n${startStr} — ${endStr}\n${payloadStr}` : `${name}\n${startStr} — ${endStr}`
+    return [
+      {
+        xAxis: start,
+        label: {
+          show: true,
+          formatter: () => labelText,
+          fontSize: 10,
+          color: '#888',
+          offset: [0, -2],
+          position: 'top',
+        },
+        itemStyle: {
+          color: 'rgba(88, 166, 255, 0.12)',
+          borderColor: 'rgba(88, 166, 255, 0.55)',
+          borderWidth: 1,
+        },
+      },
+      { xAxis: end },
+    ]
+  })
+
+  // Фазы рейса цветами (как в Истории) — для выбранного рейса, если есть фазы
+  const phaseColorsChart: Record<string, string> = {
+    loading: 'rgba(245, 158, 11, 0.35)',
+    transport: 'rgba(16, 185, 129, 0.35)',
+    unloading: 'rgba(239, 68, 68, 0.35)',
+    return: 'rgba(59, 130, 246, 0.35)',
+  }
+  const phaseMarkAreaData: [unknown, unknown][] = []
+  const markLineData: { xAxis: number }[] = []
+  if (points.length > 0) {
+    tripsInChart.forEach((t) => {
+      const rawPhases =
+        t.id === selectedTripId && selectedTripPhases && selectedTripPhases.length > 0
+          ? selectedTripPhases
+          : t.phases
+      if (!Array.isArray(rawPhases) || rawPhases.length === 0) return
+      rawPhases.forEach((ph: TripPhase | { phase?: string; from?: string; to?: string }, i: number) => {
+        const started = (ph as TripPhase).started_at ?? (ph as { from?: string }).from ?? ''
+        const ended = (ph as TripPhase).ended_at ?? (ph as { to?: string }).to ?? ''
+        const phStart = timeToIndex(started)
+        const phEnd = timeToIndex(ended)
+        if (phEnd > phStart) {
+          const phaseType = (ph as TripPhase).phase_type ?? getPhaseType(ph)
+          phaseMarkAreaData.push([
+            { xAxis: phStart, itemStyle: { color: phaseColorsChart[phaseType] ?? 'rgba(128,128,128,0.3)' } },
+            { xAxis: phEnd },
+          ])
+        }
+        if (i < rawPhases.length - 1) {
+          markLineData.push({ xAxis: timeToIndex(ended) })
+        }
+      })
+    })
+  }
+
+  const allMarkAreaData = [
+    ...tripMarkAreaData,
+    ...phaseMarkAreaData,
+    ...(slidingWindowMarkArea?.data ?? []),
+  ]
+  const hasMarkArea = allMarkAreaData.length > 0
+  const speedSeriesMarkArea = hasMarkArea
+    ? {
+        silent: true,
+        data: allMarkAreaData,
+        itemStyle: { color: 'rgba(88, 166, 255, 0.15)' },
+      }
+    : undefined
 
   const option = {
     animation: false,
@@ -362,7 +498,17 @@ export default function Operational() {
         yAxisIndex: 0,
         symbol: showChartPoints ? 'circle' : 'none',
         symbolSize: showChartPoints ? 4 : undefined,
-        markArea: slidingWindowMarkArea,
+        markArea: speedSeriesMarkArea,
+        markLine:
+          markLineData.length > 0
+            ? {
+                silent: true,
+                symbol: ['none', 'none'],
+                label: { show: false },
+                lineStyle: { type: 'dashed', color: 'rgba(255,255,255,0.55)', width: 1 },
+                data: markLineData,
+              }
+            : undefined,
       },
       {
         name: 'Вес, т',
@@ -391,41 +537,49 @@ export default function Operational() {
     setSelectedTo(to)
   }
 
+  const sectionGap = '1.5rem' /* как отступ между меню и началом секции «Скорость и вес» (.page-content padding) */
+
   return (
-    <div>
-      <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-        <button
-          type="button"
-          onClick={() => setConfirmAction('start')}
-          disabled={running}
-          title="Запустить генерацию"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width={20}
-            height={20}
-            style={{ ...iconStyle, verticalAlign: 'middle', marginRight: '0.35rem', color: 'var(--success)' }}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: sectionGap }}>
+      <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', justifyContent: 'space-between', marginBottom: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setConfirmAction('start')}
+            disabled={running}
+            title="Запустить генерацию"
           >
-            <path d="M5 3l14 9-14 9V3z" />
-          </svg>
-          Старт
-        </button>
-        <button
-          type="button"
-          onClick={() => setConfirmAction('stop')}
-          disabled={!running}
-          title="Остановить генерацию"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width={20}
-            height={20}
-            style={{ ...iconStyle, verticalAlign: 'middle', marginRight: '0.35rem', color: 'var(--danger)' }}
+            <svg
+              viewBox="0 0 24 24"
+              width={20}
+              height={20}
+              style={{ ...iconStyle, verticalAlign: 'middle', marginRight: '0.35rem', color: 'var(--success)' }}
+            >
+              <path d="M5 3l14 9-14 9V3z" />
+            </svg>
+            Старт
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmAction('stop')}
+            disabled={!running}
+            title="Остановить генерацию"
           >
-            <rect x="6" y="6" width="12" height="12" />
-          </svg>
-          Стоп
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              width={20}
+              height={20}
+              style={{ ...iconStyle, verticalAlign: 'middle', marginRight: '0.35rem', color: 'var(--danger)' }}
+            >
+              <rect x="6" y="6" width="12" height="12" />
+            </svg>
+            Стоп
+          </button>
+          <span className={`generation-status ${running ? 'running' : ''}`} style={{ marginLeft: '0.5rem' }}>
+            <span className="generation-status-text">{running ? 'Генерация идёт' : 'Остановлено'}</span>
+          </span>
+          {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
+        </div>
         <button type="button" onClick={() => setConfirmAction('clear')} title="Очистить оперативные данные и буфер распознавания">
           <svg viewBox="0 0 24 24" width={20} height={20} style={{ verticalAlign: 'middle', marginRight: '0.35rem' }} {...iconStyle}>
             <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" />
@@ -461,64 +615,82 @@ export default function Operational() {
             </div>
           </div>
         )}
-        <span className={`generation-status ${running ? 'running' : ''}`} style={{ marginLeft: '1rem' }}>
-          <span className="generation-status-text">{running ? 'Генерация идёт' : 'Остановлено'}</span>
-        </span>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: '1rem', cursor: 'pointer' }}>
-          <span style={{ fontSize: '0.9rem' }}>Включить распознавание</span>
-          <input
-            type="checkbox"
-            checked={recognitionEnabled}
-            onChange={handleToggleRecognition}
-            style={{ width: '1.1rem', height: '1.1rem' }}
-          />
-        </label>
-        {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
       </div>
 
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'stretch', marginTop: '1rem', minHeight: 0 }}>
-        <div className="card" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+      <div style={{ display: 'flex', gap: sectionGap, alignItems: 'stretch', minHeight: 0 }}>
+        <div className="card" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', marginBottom: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
             <h3 style={{ margin: 0 }}>Скорость и вес</h3>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={showSlideZone}
-                onChange={(e) => setSession({ showSlideZone: e.target.checked })}
-                style={{ width: '1rem', height: '1rem' }}
-              />
-              <span>Показывать анализируемый интервал (Слайд)</span>
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={showChartPoints}
-                onChange={(e) => setSession({ showChartPoints: e.target.checked })}
-                style={{ width: '1rem', height: '1rem' }}
-              />
-              <span>Показывать точки на графике</span>
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem' }}>
-              Диапазон:
-              <select
-                value={chartMinutes}
-                onChange={(e) => setSession({ chartMinutes: Number(e.target.value) })}
-                style={{ padding: '0.25rem 0.5rem' }}
-              >
-                {CHART_MINUTES_OPTIONS.map((m) => (
-                  <option key={m} value={m}>
-                    {m} мин
-                  </option>
-                ))}
-              </select>
-            </label>
+            <button
+              type="button"
+              onClick={() => setChartSettingsModalOpen(true)}
+              title="Настройки графика"
+              aria-label="Настройки графика"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minWidth: 40,
+                minHeight: 40,
+                padding: 0,
+                boxSizing: 'border-box',
+              }}
+            >
+              <Settings size={20} strokeWidth={2} />
+            </button>
           </div>
+          {chartSettingsModalOpen && (
+            <div className="modal-overlay" onClick={() => setChartSettingsModalOpen(false)}>
+              <div className="modal" onClick={(e) => e.stopPropagation()}>
+                <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Настройки графика</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={showSlideZone}
+                      onChange={(e) => setSession({ showSlideZone: e.target.checked })}
+                      style={{ width: '1rem', height: '1rem' }}
+                    />
+                    <span>Показывать анализируемый интервал (Слайд)</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={showChartPoints}
+                      onChange={(e) => setSession({ showChartPoints: e.target.checked })}
+                      style={{ width: '1rem', height: '1rem' }}
+                    />
+                    <span>Показывать точки на графике</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem' }}>
+                    Диапазон:
+                    <select
+                      value={chartMinutes}
+                      onChange={(e) => setSession({ chartMinutes: Number(e.target.value) })}
+                      style={{ padding: '0.25rem 0.5rem' }}
+                    >
+                      {CHART_MINUTES_OPTIONS.map((m) => (
+                        <option key={m} value={m}>
+                          {m} мин
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div style={{ marginTop: '1.25rem' }}>
+                  <button type="button" onClick={() => setChartSettingsModalOpen(false)}>
+                    Закрыть
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div style={{ flex: 1, minHeight: 360 }}>
             <ReactECharts option={option} style={{ height: '100%', minHeight: 360 }} notMerge onEvents={{ dataZoom: onDataZoom }} />
           </div>
         </div>
 
-        <div className="card" style={{ width: 540, flexShrink: 0 }}>
+        <div className="card" style={{ width: 540, flexShrink: 0, marginBottom: 0 }}>
           <h3 style={{ marginTop: 0 }}>Анализ</h3>
           {analysis ? (
             <>
@@ -591,7 +763,7 @@ export default function Operational() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'stretch', marginTop: '1rem', minHeight: 0 }}>
+      <div style={{ display: 'flex', gap: sectionGap, alignItems: 'stretch', height: 680 }}>
         <div
           ref={tripsPhasesContainerRef}
           style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'stretch' }}
@@ -599,6 +771,7 @@ export default function Operational() {
           <div
             className="card"
             style={{
+              marginBottom: 0,
               width: Math.max(TRIPS_PANEL_MIN_PX, Math.min(TRIPS_PANEL_MAX_PX, Number(tripsPanelWidthPxV4) ?? OPERATIONAL_SESSION_DEFAULTS.tripsPanelWidthPxV4)),
               minWidth: TRIPS_PANEL_MIN_PX,
               flexShrink: 0,
@@ -607,31 +780,59 @@ export default function Operational() {
               minHeight: 0,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'nowrap', marginBottom: '0.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
               <h3 style={{ marginTop: 0, marginBottom: 0, flexShrink: 0 }}>Найденные рейсы</h3>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem', flexShrink: 0 }}>
-                Показать последние:
-                <select
-                  value={tripsLimit}
-                  onChange={(e) => {
-                    setSession({ tripsLimit: Number(e.target.value) })
-                  }}
-                  aria-label="Показать последние рейсы"
-                >
-                  {TRIPS_LIMIT_OPTIONS.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <button
+                type="button"
+                onClick={() => setTripsLimitModalOpen(true)}
+                title="Настройки таблицы"
+                aria-label="Настройки таблицы"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 40,
+                  minHeight: 40,
+                  padding: 0,
+                  boxSizing: 'border-box',
+                }}
+              >
+                <Settings size={20} strokeWidth={2} />
+              </button>
             </div>
+            {tripsLimitModalOpen && (
+              <div className="modal-overlay" onClick={() => setTripsLimitModalOpen(false)}>
+                <div className="modal" onClick={(e) => e.stopPropagation()}>
+                  <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Настройки таблицы</h3>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.9rem' }}>
+                    Показать последние:
+                    <select
+                      value={tripsLimit}
+                      onChange={(e) => setSession({ tripsLimit: Number(e.target.value) })}
+                      aria-label="Показать последние рейсы"
+                      style={{ padding: '0.35rem 0.5rem', marginLeft: '0.5rem' }}
+                    >
+                      {TRIPS_LIMIT_OPTIONS.map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div style={{ marginTop: '1.25rem' }}>
+                    <button type="button" onClick={() => setTripsLimitModalOpen(false)}>
+                      Закрыть
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             <div
               ref={tripsTableWrapperRef}
               role="grid"
               aria-label="Найденные рейсы"
               tabIndex={0}
-              style={{ overflowX: 'auto', flex: 1, minHeight: 0, outline: 'none' }}
+              style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 0, outline: 'none' }}
               onKeyDown={(e) => {
                 if (trips.length === 0) return
                 if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
@@ -709,12 +910,23 @@ export default function Operational() {
             }}
           />
 
-          <div className="card" style={{ flex: 1, minWidth: PHASES_PANEL_MIN_PX, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <h3 style={{ marginTop: 0 }}>Фазы рейса</h3>
+          <div className="card" style={{ flex: 1, minWidth: PHASES_PANEL_MIN_PX, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0 }}>
+            <h3 style={{ marginTop: 0, flexShrink: 0 }}>Фазы рейса</h3>
+            <div style={{ height: 4, marginTop: 2, marginBottom: 6, flexShrink: 0 }}>
+              <div
+                className="phases-loading-bar"
+                style={{
+                  opacity: loadingPhases ? 1 : 0,
+                  transition: 'opacity 0.25s ease-out',
+                  pointerEvents: 'none',
+                }}
+                aria-hidden
+              />
+            </div>
             {!selectedTripId ? (
               <p style={{ color: 'var(--muted)', margin: 0 }}>Выберите рейс в таблице слева</p>
             ) : loadingPhases ? (
-              <p style={{ color: 'var(--muted)', margin: 0 }}>Загрузка фаз…</p>
+              <div style={{ flex: 1, minHeight: 0 }} />
             ) : selectedTripPhases && selectedTripPhases.length > 0 ? (
               <div style={{ overflowX: 'auto', flex: 1, minHeight: 0 }}>
                 <table className="data-table operational-phases-table">
@@ -766,10 +978,10 @@ export default function Operational() {
           </div>
         </div>
 
-        <div className="card" style={{ width: 540, flexShrink: 0 }}>
-        <h3 style={{ marginTop: 0 }}>Статистика</h3>
+        <div className="card" style={{ width: 540, flexShrink: 0, marginBottom: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <h3 style={{ marginTop: 0, flexShrink: 0 }}>Статистика</h3>
         {stats ? (
-          <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: 6, padding: '0.75rem 1rem' }}>
+          <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: 6, padding: '0.75rem 1rem', flex: 1, minHeight: 0, overflowY: 'auto' }}>
             <p style={{ margin: '0 0 0.35rem', fontSize: '0.9rem', color: 'var(--muted)' }}>Сеанс</p>
             <p style={metricRowStyle}>
               <strong>Последний запуск:</strong>{' '}

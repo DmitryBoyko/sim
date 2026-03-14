@@ -64,10 +64,19 @@ export default function Processes() {
     } catch (e) {
       setError(String(e))
       setJobs((prev) => (Array.isArray(prev) ? prev : []))
+      throw e
     } finally {
       setLoading(false)
     }
   }, [filter])
+  const loadWithToast = useCallback(async () => {
+    try {
+      await load()
+      addToast('Список обновлён.', 'success')
+    } catch {
+      addToast('Ошибка загрузки списка.', 'error')
+    }
+  }, [load, addToast])
 
   useEffect(() => {
     load()
@@ -87,8 +96,11 @@ export default function Processes() {
     try {
       await api.cancelJob(id)
       await load()
+      addToast('Процесс отменён.', 'success')
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     } finally {
       setCancellingId(null)
     }
@@ -100,8 +112,11 @@ export default function Processes() {
     try {
       await api.deleteJob(id)
       await load()
+      addToast('Запись о процессе удалена.', 'success')
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     } finally {
       setDeletingId(null)
     }
@@ -118,7 +133,9 @@ export default function Processes() {
         addToast(`Удалено завершённых процессов: ${deleted}`, 'success')
       }
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      addToast(msg, 'error')
     } finally {
       setDeletingAllCompleted(false)
     }
@@ -139,7 +156,7 @@ export default function Processes() {
             <option value="active">Только активные</option>
           </select>
         </label>
-        <button type="button" onClick={load} disabled={loading}>
+        <button type="button" onClick={loadWithToast} disabled={loading}>
           {loading ? 'Загрузка…' : 'Обновить'}
         </button>
         <button
