@@ -50,10 +50,10 @@ $$
 Точка считается **принадлежащей плато** по весу, если
 
 $$
-\sigma_i < \varepsilon_{\text{plateau}},
+\sigma_i < \varepsilon\_{\text{plateau}},
 $$
 
-где $\varepsilon_{\text{plateau}}$ — допуск шума плато (параметр `plateau_noise_tolerance_ton`).
+где $\varepsilon\_{\text{plateau}}$ — допуск шума плато (параметр `plateau_noise_tolerance_ton`).
 
 Результат — бинарная маска:
 
@@ -77,11 +77,11 @@ $$
 1. Находим **левый** и **правый** края плато:
   - $L = \min i \mid \mathrm{isOnPlateau}[i] = 1 $,
   - $R = \max i \mid \mathrm{isOnPlateau}[i] = 1 $.
-2. Оцениваем **опорный уровень веса плато** $m_{\text{ref}}$ по стабильным точкам на краях:
+2. Оцениваем **опорный уровень веса плато** $m\_{\text{ref}}$ по стабильным точкам на краях:
   - берём по $K$ точек справа от $L$ и слева от $R$ (обычно $K=3$),  
   - считаем по ним **медиану**:
    $$
-   m_{\text{ref}} = \mathrm{median}\bigl( m_{L},\dots,m_{L+K-1}, m_{R-K+1},\dots,m_R \bigr).
+   m\_{\text{ref}} = \mathrm{median}\bigl( m_{L},\dots,m_{L+K-1}, m_{R-K+1},\dots,m_R \bigr).
    $$
 3. Внутри $[L, R]$ ищем все **разрывы**:
   - разрыв $G = [a,b)$ — максимальный интервал индексов $i \in [a,b-1]$ такой, что
@@ -89,11 +89,11 @@ $$
    $\mathrm{isOnPlateau}[a-1]=1$ и $\mathrm{isOnPlateau}[b]=1$.
 4. Для каждого разрыва $G$ проверяем два условия:
   - **ограничение по длине**:
-   $$ |G| = b-a \le K_{\text{gap}}, $$
-  где $K_{\text{gap}} = \text{plateaumaxgappoints}$,
+   $$ |G| = b-a \le K\_{\text{gap}}, $$
+  где $K\_{\text{gap}} = \text{plateaumaxgappoints}$,
   - **ограничение по уровню веса**:
-  $$ \forall i \in G:\ |m_i - m_{\text{ref}}| \le \tau, $$
-    где $\tau \approx 2 \cdot \varepsilon_{\text{plateau}}$ — допуск по весу.
+  $$ \forall i \in G:\ |m_i - m\_{\text{ref}}| \le \tau, $$
+    где $\tau \approx 2 \cdot \varepsilon\_{\text{plateau}}$ — допуск по весу.
 5. Если оба условия выполняются, разрыв считается **шумовым**, и маска заполняется:
   $$ \forall i \in G:\ \mathrm{isOnPlateau}[i] \gets 1. $$
   По сути, это **условный closing**: мы заполняем только те провалы, которые одновременно **короткие** и **по уровню близки к плато**.
@@ -104,27 +104,27 @@ $$
 
 Даже после closing крайние точки плато могут не включать 1–5 «стоящих» измерений, где вес уже вышел на плато, но из‑за переходов std был завышен. Для этого применяется **дилатация краёв**.
 
-1. По точкам, помеченным как плато и лежащим **выше порога груза** $m_{\text{thr}}$, оценивается средний вес:
+1. По точкам, помеченным как плато и лежащим **выше порога груза** $m\_{\text{thr}}$, оценивается средний вес:
 
 $$
-m_{\text{plateau}} = \frac{1}{|P_{\text{high}}|}\sum_{i \in P_{\text{high}}} m_i,\quad
-P_{\text{high}} =  i \mid \mathrm{isOnPlateau}[i]=1,\ m_i > m_{\text{thr}} .
+m\_{\text{plateau}} = \frac{1}{|P\_{\text{high}}|}\sum_{i \in P\_{\text{high}}} m_i,\quad
+P\_{\text{high}} =  i \mid \mathrm{isOnPlateau}[i]=1,\ m_i > m\_{\text{thr}} .
 $$
 
 1. Определяются левый и правый края плато (как выше).
 2. **Расширение влево**:
 
 $$
-i \gets L-1,\ \text{пока } i \ge 1\ \text{и } \text{count} < K_{\text{dil}}:
+i \gets L-1,\ \text{пока } i \ge 1\ \text{и } \text{count} < K\_{\text{dil}}:
 $$
 
 - включаем точку в плато, если
   $$
-  |m_i - m_{\text{plateau}}| \le \tau_{\text{dil}}
+  |m_i - m\_{\text{plateau}}| \le \tau\_{\text{dil}}
   \quad\text{и}\quad
-  v_i \le v_{\text{baseline}},
+  v_i \le v\_{\text{baseline}},
   $$
-  где $\tau_{\text{dil}}$ пропорционален допуску шума плато, а $v_{\text{baseline}}$ — порог «скорость у оси»;
+  где $\tau\_{\text{dil}}$ пропорционален допуску шума плато, а $v\_{\text{baseline}}$ — порог «скорость у оси»;
 - иначе расширение влево останавливается.
 
 1. Аналогично выполняется **расширение вправо** от правого края.
@@ -156,24 +156,24 @@ $$
 
 - начало транспортировки:
 $$
-T_{\text{start}} = t_{a_{\min}},
+T\_{\text{start}} = t_{a_{\min}},
 $$
 где $a_{\min}$ — минимальный индекс начала среди high‑сегментов;
 - конец транспортировки:
 $$
-T_{\text{end}} = t_{b_{\max}},
+T\_{\text{end}} = t_{b_{\max}},
 $$
 где $b_{\max}$ — максимальный индекс конца;
 - множество точек транспортировки:
 $$
-P_{\text{transport}} = \bigcup S_k^{\text{high}}.
+P\_{\text{transport}} = \bigcup S_k^{\text{high}}.
 $$
 
 Фазы определяются как интервалы по времени:
 
-- погрузка (loading): от $t_1$ до $T_{\text{start}}$,
-- транспортировка (transport): от $T_{\text{start}}$ до $T_{\text{end}}$,
-- разгрузка (unloading): от $T_{\text{end}}$ до начала низкого плато или конца рейса,
+- погрузка (loading): от $t_1$ до $T\_{\text{start}}$,
+- транспортировка (transport): от $T\_{\text{start}}$ до $T\_{\text{end}}$,
+- разгрузка (unloading): от $T\_{\text{end}}$ до начала низкого плато или конца рейса,
 - возврат (return): от конца разгрузки до конца рейса.
 
 ---
@@ -187,19 +187,19 @@ $$
 $$
  m_i^{\text{transport}} *{i \in P*{\text{transport}}},
 \quad
-m_{\text{transport}} = \mathrm{median}\bigl( m_i^{\text{transport}} \bigr).
+m\_{\text{transport}} = \mathrm{median}\bigl( m_i^{\text{transport}} \bigr).
 $$
 
 1. Для возврата:
 
 - если есть фаза возврата, по её точкам рассчитывается
-$m_{\text{return}} = \mathrm{median}(m_i^{\text{return}})$;
-- иначе используется калибровочное значение порожнего веса $m_{\text{empty}}$ из настроек.
+$m\_{\text{return}} = \mathrm{median}(m_i^{\text{return}})$;
+- иначе используется калибровочное значение порожнего веса $m\_{\text{empty}}$ из настроек.
 
 1. Вес груза:
 
 $$
-\text{payload} = \max\bigl(0,\ m_{\text{transport}} - m_{\text{return}}\bigr).
+\text{payload} = \max\bigl(0,\ m\_{\text{transport}} - m\_{\text{return}}\bigr).
 $$
 
 Использование медианы делает оценку **устойчивой к локальным провалам** веса в фазе транспортировки (ремонтные ямы, кратковременные колебания датчика).
@@ -294,14 +294,14 @@ $$
 
 Чтобы окно действительно описывало полный рейс, а не только его середину, используется проверка **baseline**:
 
-- заданы пороги $v_{\text{axis}}$, $m_{\text{axis}}$;
+- заданы пороги $v\_{\text{axis}}$, $m\_{\text{axis}}$;
 - начало и конец окна должны удовлетворять:
 
 $$
-v_{\text{start}} \le v_{\text{axis}},\quad m_{\text{start}} \le m_{\text{axis}},
+v\_{\text{start}} \le v\_{\text{axis}},\quad m\_{\text{start}} \le m\_{\text{axis}},
 $$
 $$
-v_{\text{end}} \le v_{\text{axis}},\quad m_{\text{end}} \le m_{\text{axis}}.
+v\_{\text{end}} \le v\_{\text{axis}},\quad m\_{\text{end}} \le m\_{\text{axis}}.
 $$
 
 Это гарантирует, что рейс начинается и заканчивается в «спокойном» состоянии у оси абсцисс.
@@ -310,13 +310,13 @@ $$
 
 ### 10. Охлаждение (refractory period) между рейсами
 
-Для предотвращения повторного срабатывания на соседних окнах поверх одного и того же рейса вводится **период охлаждения** $T_{\text{cool}}$:
+Для предотвращения повторного срабатывания на соседних окнах поверх одного и того же рейса вводится **период охлаждения** $T\_{\text{cool}}$:
 
-- пусть для предыдущего рейса конец = $T_{\text{prevend}}$,
-- кандидат с окном $[T_{\text{start}}, T_{\text{end}}]$ принимается только если
+- пусть для предыдущего рейса конец = $T\_{\text{prevend}}$,
+- кандидат с окном $[T\_{\text{start}}, T\_{\text{end}}]$ принимается только если
 
 $$
-T_{\text{start}} \ge T_{\text{prevend}} + T_{\text{cool}}.
+T\_{\text{start}} \ge T\_{\text{prevend}} + T\_{\text{cool}}.
 $$
 
 Это классический приём из теории сигналов (аналог рефрактерного периода в детекторах событий), снижающий число дублей.
