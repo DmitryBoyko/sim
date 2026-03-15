@@ -77,21 +77,34 @@ $$
   - $R = \max i \mid \mathrm{isOnPlateau}[i] = 1 $.
 2. Оцениваем **опорный уровень веса плато** $m_{\text{ref}}$ по стабильным точкам на краях:
   - берём по $K$ точек справа от $L$ и слева от $R$ (обычно $K=3$),  
-  - считаем по ним **медиану**:
-   $$ m_{\text{ref}} = \mathrm{median}\bigl( m_{L},\dots,m_{L+K-1}, m_{R-K+1},\dots,m_R \bigr). $$
+  - считаем по ним **медиану** — опорный уровень веса плато:
+
+```math
+m_{\mathrm{ref}} = \mathrm{median}\bigl( m_{L},\dots,m_{L+K-1}, m_{R-K+1},\dots,m_R \bigr).
+```
+
 3. Внутри $[L, R]$ ищем все **разрывы**:
   - разрыв $G = [a,b)$ — максимальный интервал индексов $i \in [a,b-1]$ такой, что
    $\mathrm{isOnPlateau}[i]=0$, причём по краям:
    $\mathrm{isOnPlateau}[a-1]=1$ и $\mathrm{isOnPlateau}[b]=1$.
 4. Для каждого разрыва $G$ проверяем два условия:
-  - **ограничение по длине**:
-   $$ |G| = b-a \le K_{\text{gap}}, $$
-   где $$ K_{\text{gap}} = \text{plateaumaxgappoints}, $$
-  - **ограничение по уровню веса**:
-  $$ \forall i \in G:\ |m_i - m_{\text{ref}}| \le \tau, $$
-   где $$ \tau \approx 2 \cdot \varepsilon_{\text{plateau}} $$ — допуск по весу.
+  - **ограничение по длине** (разрыв не длиннее порога):
+
+```math
+|G| = b-a \le K_{\mathrm{gap}}, \quad K_{\mathrm{gap}} = \text{plateaumaxgappoints}.
+```
+
+  - **ограничение по уровню веса** (точки разрыва близки к плато):
+
+```math
+\forall i \in G:\ |m_i - m_{\mathrm{ref}}| \le \tau, \quad \tau \approx 2 \cdot \varepsilon_{\mathrm{plateau}}.
+```
+
 5. Если оба условия выполняются, разрыв считается **шумовым**, и маска заполняется:
-  $$ \forall i \in G:\ \mathrm{isOnPlateau}[i] \gets 1. $$
+
+```math
+\forall i \in G:\ \mathrm{isOnPlateau}[i] \gets 1.
+```
   По сути, это **условный closing**: мы заполняем только те провалы, которые одновременно **короткие** и **по уровню близки к плато**.
 
 ---
