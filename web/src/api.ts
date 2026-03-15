@@ -395,7 +395,7 @@ export async function deleteLogs(params: DeleteLogsParams): Promise<{ deleted: n
   return data as { deleted: number }
 }
 
-/** Get markdown content for a doc. file: README.md | docs/API.md | docs/ARCHITECTURE.md | docs/MATH.md */
+/** Get markdown content for a doc. file: README.md | docs/BUILD_AND_RUN.md | docs/SECURITY.md | docs/API.md | docs/ARCHITECTURE.md | docs/MATH.md */
 export async function getDoc(file: string): Promise<{ content: string }> {
   const r = await apiFetch('/api/docs?file=' + encodeURIComponent(file))
   const data = await r.json()

@@ -15,8 +15,17 @@ import (
 	"sim/internal/service/queue"
 	"sim/internal/service/recognition"
 	"time"
+
+	_ "sim/docs"
 )
 
+//go:generate go run github.com/swaggo/swag/cmd/swag@latest init -g main.go --parseDependency --parseInternal --output ../../docs
+
+// @title        Sim API
+// @version      1.0
+// @description  API симулятора (настройки, управление, данные, шаблоны, рейсы, задачи, логи)
+// @host         localhost:8080
+// @BasePath     /api
 func main() {
 	settings, dsn, err := config.Load()
 	if err != nil {

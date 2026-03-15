@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // webDistDir returns absolute path to web/dist: relative to executable (Docker) or CWD (local).
@@ -90,6 +92,7 @@ func Router(s *Server) *gin.Engine {
 		api.GET("/docs", s.DocsGet)
 	}
 	r.GET("/ws", s.HandleWebSocket)
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	return r
 }
 

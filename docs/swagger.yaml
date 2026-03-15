@@ -1,0 +1,10 @@
+basePath: /api
+host: localhost:8080
+info:
+  contact: {}
+  description: API симулятора (настройки, управление, данные, шаблоны, рейсы, задачи,
+    логи)
+  title: Sim API
+  version: "1.0"
+paths: {}
+swagger: "2.0"

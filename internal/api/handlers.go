@@ -46,6 +46,12 @@ type Server struct {
 }
 
 // GetSettings returns current app settings from DB.
+// @Summary      Get settings
+// @Tags         settings
+// @Produce      json
+// @Success      200  {object}  domain.AppSettings
+// @Failure      500  {object}  map[string]string
+// @Router       /settings [get]
 func (s *Server) GetSettings(c *gin.Context) {
 	ctx := c.Request.Context()
 	settings, err := s.ParamsRepo.GetSettings(ctx)
@@ -58,6 +64,15 @@ func (s *Server) GetSettings(c *gin.Context) {
 }
 
 // PutSettings saves settings to DB and updates in-memory services.
+// @Summary      Update settings
+// @Tags         settings
+// @Accept       json
+// @Produce      json
+// @Param        body  body  domain.AppSettings  true  "Settings"
+// @Success      200   {object}  map[string]bool
+// @Failure      400   {object}  map[string]string
+// @Failure      500   {object}  map[string]string
+// @Router       /settings [put]
 func (s *Server) PutSettings(c *gin.Context) {
 	ctx := c.Request.Context()
 	var settings domain.AppSettings
@@ -83,6 +98,11 @@ func (s *Server) PutSettings(c *gin.Context) {
 }
 
 // ControlStart starts the generator.
+// @Summary      Start simulation
+// @Tags         control
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Router       /control/start [post]
 func (s *Server) ControlStart(c *gin.Context) {
 	s.genMu.Lock()
 	if s.genRunning {
@@ -107,6 +127,11 @@ func (s *Server) ControlStart(c *gin.Context) {
 }
 
 // ControlStop stops the generator.
+// @Summary      Stop simulation
+// @Tags         control
+// @Produce      json
+// @Success      200  {object}  map[string]bool
+// @Router       /control/stop [post]
 func (s *Server) ControlStop(c *gin.Context) {
 	s.genMu.Lock()
 	if !s.genRunning {
@@ -129,6 +154,12 @@ func (s *Server) IsGeneratorRunning() bool {
 }
 
 // ControlClear clears queue, operational data, and recognition window.
+// @Summary      Clear data and recognition state
+// @Tags         control
+// @Produce      json
+// @Success      200  {object}  map[string]bool
+// @Failure      500  {object}  map[string]string
+// @Router       /control/clear [post]
 func (s *Server) ControlClear(c *gin.Context) {
 	ctx := c.Request.Context()
 	s.Queue.Clear()
@@ -143,6 +174,12 @@ func (s *Server) ControlClear(c *gin.Context) {
 }
 
 // DataOperationalStats returns session and operational statistics for the Simulation page.
+// @Summary      Operational and session stats
+// @Tags         data
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Failure      500  {object}  map[string]string
+// @Router       /data/operational/stats [get]
 func (s *Server) DataOperationalStats(c *gin.Context) {
 	ctx := c.Request.Context()
 	s.genMu.Lock()
@@ -240,6 +277,13 @@ func (s *Server) DataOperationalStats(c *gin.Context) {
 func round2(f float64) float64 { return float64(int(f*100+0.5)) / 100 }
 
 // DataOperational returns last N minutes: from in-memory queue if available, else from DB.
+// @Summary      Operational data points
+// @Tags         data
+// @Produce      json
+// @Param        minutes  query     int  false  "Last N minutes"  default(30)
+// @Success      200      {object}  map[string]interface{}
+// @Failure      500      {object}  map[string]string
+// @Router       /data/operational [get]
 func (s *Server) DataOperational(c *gin.Context) {
 	ctx := c.Request.Context()
 	minutes := 30
@@ -262,6 +306,14 @@ func (s *Server) DataOperational(c *gin.Context) {
 }
 
 // TemplatesList returns templates (with has_vector). Optional query: limit, offset for pagination; then total is returned.
+// @Summary      List templates
+// @Tags         templates
+// @Produce      json
+// @Param        limit   query  int  false  "Pagination limit"
+// @Param        offset  query  int  false  "Pagination offset"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      500  {object}  map[string]string
+// @Router       /templates [get]
 func (s *Server) TemplatesList(c *gin.Context) {
 	ctx := c.Request.Context()
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "0"))
@@ -292,6 +344,14 @@ func (s *Server) TemplatesList(c *gin.Context) {
 }
 
 // TemplatesGet returns one template by ID (with raw_speed, raw_weight for view).
+// @Summary      Get template by ID
+// @Tags         templates
+// @Produce      json
+// @Param        id   path      string  true  "Template ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /templates/{id} [get]
 func (s *Server) TemplatesGet(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
@@ -311,6 +371,16 @@ func (s *Server) TemplatesGet(c *gin.Context) {
 }
 
 // TemplatesUpdate updates template name and/or narrows range (from_index, to_index).
+// @Summary      Update template
+// @Tags         templates
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string  true  "Template ID"
+// @Param        body  body      object  true  "name, from_index, to_index"
+// @Success      200   {object}  map[string]bool
+// @Failure      400   {object}  map[string]string
+// @Failure      500   {object}  map[string]string
+// @Router       /templates/{id} [put]
 func (s *Server) TemplatesUpdate(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
@@ -340,6 +410,15 @@ func (s *Server) TemplatesUpdate(c *gin.Context) {
 }
 
 // TemplatesCreate saves a new template from selected points.
+// @Summary      Create template
+// @Tags         templates
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object  true  "name, points[]"
+// @Success      200   {object}  map[string]string
+// @Failure      400   {object}  map[string]string
+// @Failure      500   {object}  map[string]string
+// @Router       /templates [post]
 func (s *Server) TemplatesCreate(c *gin.Context) {
 	ctx := c.Request.Context()
 	var body struct {
@@ -377,6 +456,13 @@ func (s *Server) TemplatesCreate(c *gin.Context) {
 }
 
 // TemplatesDelete deletes a template.
+// @Summary      Delete template
+// @Tags         templates
+// @Param        id   path      string  true  "Template ID"
+// @Success      200  {object}  map[string]bool
+// @Failure      400  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /templates/{id} [delete]
 func (s *Server) TemplatesDelete(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
@@ -443,6 +529,15 @@ func (s *Server) RunAnalysisAndBroadcast(ctx context.Context, t domain.DetectedT
 }
 
 // TripsList returns detected trips (with payload_ton).
+// @Summary      List trips
+// @Tags         trips
+// @Produce      json
+// @Param        from   query  string  false  "From (RFC3339)"
+// @Param        to     query  string  false  "To (RFC3339)"
+// @Param        limit  query  int     false  "Limit"  default(50)
+// @Success      200  {object}  map[string]interface{}
+// @Failure      500  {object}  map[string]string
+// @Router       /trips [get]
 func (s *Server) TripsList(c *gin.Context) {
 	ctx := c.Request.Context()
 	var from, to *time.Time
@@ -471,7 +566,16 @@ func (s *Server) TripsList(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"trips": list})
 }
 
-// TripsPhases returns phases and payload for a trip. GET /api/trips/:id/phases
+// TripsPhases returns phases and payload for a trip.
+// @Summary      Get trip phases and payload
+// @Tags         trips
+// @Produce      json
+// @Param        id   path      string  true  "Trip ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /trips/{id}/phases [get]
 func (s *Server) TripsPhases(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
@@ -507,6 +611,12 @@ func (s *Server) TripsPhases(c *gin.Context) {
 }
 
 // TripsDeleteAll deletes all detected trips.
+// @Summary      Delete all trips
+// @Tags         trips
+// @Produce      json
+// @Success      200  {object}  map[string]bool
+// @Failure      500  {object}  map[string]string
+// @Router       /trips [delete]
 func (s *Server) TripsDeleteAll(c *gin.Context) {
 	ctx := c.Request.Context()
 	if err := s.TripsRepo.DeleteAll(ctx); err != nil {
@@ -518,6 +628,15 @@ func (s *Server) TripsDeleteAll(c *gin.Context) {
 }
 
 // History returns data and trips for a time range.
+// @Summary      History (points and trips)
+// @Tags         history
+// @Produce      json
+// @Param        from  query  string  true  "From (RFC3339)"
+// @Param        to    query  string  true  "To (RFC3339)"
+// @Success      200   {object}  map[string]interface{}
+// @Failure      400   {object}  map[string]string
+// @Failure      500   {object}  map[string]string
+// @Router       /history [get]
 func (s *Server) History(c *gin.Context) {
 	ctx := c.Request.Context()
 	fromStr, toStr := c.Query("from"), c.Query("to")
@@ -548,13 +667,27 @@ func (s *Server) History(c *gin.Context) {
 }
 
 // RecognitionAnalysis returns current analysis state (sliding window, loaded templates, comparisons).
+// @Summary      Recognition analysis state
+// @Tags         recognition
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Router       /recognition/analysis [get]
 func (s *Server) RecognitionAnalysis(c *gin.Context) {
 	state := s.Recognition.GetAnalysisState()
 	c.JSON(http.StatusOK, state)
 }
 
 // JobsRecalculateTrips starts a background job to recalculate trips for the given range.
-// Body: { "from": "RFC3339", "to": "RFC3339" }. Returns job id; progress via GET /api/jobs/:id.
+// @Summary      Start recalculate-trips job
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object  true  "from, to (RFC3339)"
+// @Success      202   {object}  map[string]string
+// @Failure      400   {object}  map[string]string
+// @Failure      409   {object}  map[string]interface{}
+// @Failure      500   {object}  map[string]string
+// @Router       /jobs/recalculate-trips [post]
 func (s *Server) JobsRecalculateTrips(c *gin.Context) {
 	var body struct {
 		From string `json:"from"`
@@ -676,6 +809,15 @@ func (s *Server) runRecalculateTripsJob(ctx context.Context, jobID string, from,
 }
 
 // JobByID returns a job by ID.
+// @Summary      Get job by ID
+// @Tags         jobs
+// @Produce      json
+// @Param        id   path      string  true  "Job ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /jobs/{id} [get]
 func (s *Server) JobByID(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
@@ -696,7 +838,15 @@ func (s *Server) JobByID(c *gin.Context) {
 	c.JSON(http.StatusOK, job)
 }
 
-// JobActive returns the active (pending/running) job for the given kind. Query: kind=recalculate_trips.
+// JobActive returns the active (pending/running) job for the given kind.
+// @Summary      Get active job by kind
+// @Tags         jobs
+// @Produce      json
+// @Param        kind  query     string  true  "Job kind (e.g. recalculate_trips)"
+// @Success      200   {object}  map[string]interface{}
+// @Failure      400   {object}  map[string]string
+// @Failure      500   {object}  map[string]string
+// @Router       /jobs/active [get]
 func (s *Server) JobActive(c *gin.Context) {
 	ctx := c.Request.Context()
 	kind := c.Query("kind")
@@ -717,7 +867,15 @@ func (s *Server) JobActive(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"job": job})
 }
 
-// JobList returns jobs, optionally filtered by status. Query: status=running,pending (comma-sep), limit=50.
+// JobList returns jobs, optionally filtered by status.
+// @Summary      List jobs
+// @Tags         jobs
+// @Produce      json
+// @Param        status  query  string  false  "Filter: running,pending,completed"
+// @Param        limit   query  int     false  "Limit"  default(50)
+// @Success      200     {object}  map[string]interface{}
+// @Failure      500     {object}  map[string]string
+// @Router       /jobs [get]
 func (s *Server) JobList(c *gin.Context) {
 	ctx := c.Request.Context()
 	limit := 50
@@ -745,6 +903,15 @@ func (s *Server) JobList(c *gin.Context) {
 }
 
 // JobCancel cancels a running or pending job by ID.
+// @Summary      Cancel job
+// @Tags         jobs
+// @Produce      json
+// @Param        id   path      string  true  "Job ID"
+// @Success      200  {object}  map[string]bool
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /jobs/{id}/cancel [post]
 func (s *Server) JobCancel(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
@@ -776,6 +943,12 @@ func (s *Server) JobCancel(c *gin.Context) {
 }
 
 // JobDeleteCompleted permanently deletes all jobs with status completed.
+// @Summary      Delete completed jobs
+// @Tags         jobs
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Failure      500  {object}  map[string]string
+// @Router       /jobs/completed [delete]
 func (s *Server) JobDeleteCompleted(c *gin.Context) {
 	ctx := c.Request.Context()
 	deleted, err := s.JobsRepo.DeleteByStatus(ctx, repository.JobStatusCompleted)
@@ -788,6 +961,15 @@ func (s *Server) JobDeleteCompleted(c *gin.Context) {
 }
 
 // JobDelete permanently deletes a job by ID. Only completed jobs can be deleted.
+// @Summary      Delete job by ID
+// @Tags         jobs
+// @Produce      json
+// @Param        id   path      string  true  "Job ID"
+// @Success      200  {object}  map[string]bool
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /jobs/{id} [delete]
 func (s *Server) JobDelete(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
@@ -808,7 +990,19 @@ func (s *Server) JobDelete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// LogsList returns log entries for the given period. Query: from, to (RFC3339), source (backend|frontend), order (asc|desc), limit.
+// LogsList returns log entries for the given period.
+// @Summary      List logs
+// @Tags         logs
+// @Produce      json
+// @Param        from    query  string  true   "From (RFC3339)"
+// @Param        to      query  string  true   "To (RFC3339)"
+// @Param        source  query  string  false  "backend | frontend"
+// @Param        order   query  string  false  "asc | desc"
+// @Param        limit   query  int     false  "Limit"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /logs [get]
 func (s *Server) LogsList(c *gin.Context) {
 	ctx := c.Request.Context()
 	var from, to *time.Time
@@ -852,7 +1046,16 @@ func (s *Server) LogsList(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"logs": list})
 }
 
-// LogsCreate accepts a log entry from the frontend (source is forced to "frontend"). Body: { "level": "info"|"warn"|"error", "message": "...", "payload": {} }.
+// LogsCreate accepts a log entry from the frontend (source forced to "frontend").
+// @Summary      Create log entry
+// @Tags         logs
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object  true  "level, message, payload"
+// @Success      200   {object}  map[string]bool
+// @Failure      400   {object}  map[string]string
+// @Failure      500   {object}  map[string]string
+// @Router       /logs [post]
 func (s *Server) LogsCreate(c *gin.Context) {
 	ctx := c.Request.Context()
 	var body struct {
@@ -882,7 +1085,16 @@ func (s *Server) LogsCreate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// LogsDelete deletes log entries in the given date range. Query: from, to (RFC3339), both required.
+// LogsDelete deletes log entries in the given date range.
+// @Summary      Delete logs by range
+// @Tags         logs
+// @Produce      json
+// @Param        from  query  string  true  "From (RFC3339)"
+// @Param        to    query  string  true  "To (RFC3339)"
+// @Success      200   {object}  map[string]interface{}
+// @Failure      400   {object}  map[string]string
+// @Failure      500   {object}  map[string]string
+// @Router       /logs [delete]
 func (s *Server) LogsDelete(c *gin.Context) {
 	ctx := c.Request.Context()
 	f := c.Query("from")
@@ -916,13 +1128,24 @@ func (s *Server) LogsDelete(c *gin.Context) {
 
 // Allowed doc paths (relative to working dir). No path traversal.
 var allowedDocPaths = map[string]bool{
-	"README.md":            true,
-	"docs/API.md":          true,
-	"docs/ARCHITECTURE.md": true,
-	"docs/MATH.md":         true,
+	"README.md":               true,
+	"docs/BUILD_AND_RUN.md":   true,
+	"docs/SECURITY.md":       true,
+	"docs/API.md":            true,
+	"docs/ARCHITECTURE.md":   true,
+	"docs/MATH.md":           true,
 }
 
-// DocsGet returns raw markdown for a whitelisted file. Query: file=README.md | docs/API.md | docs/ARCHITECTURE.md | docs/MATH.md.
+// DocsGet returns raw markdown for a whitelisted file.
+// @Summary      Get doc file content
+// @Tags         docs
+// @Produce      json
+// @Param        file  query  string  true  "File: README.md | docs/BUILD_AND_RUN.md | docs/SECURITY.md | docs/API.md | docs/ARCHITECTURE.md | docs/MATH.md"
+// @Success      200   {object}  map[string]string
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      500   {object}  map[string]string
+// @Router       /docs [get]
 func (s *Server) DocsGet(c *gin.Context) {
 	file := c.Query("file")
 	if file == "" {
